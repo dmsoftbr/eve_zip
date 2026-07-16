@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use evezip_engine::EngineError;
@@ -98,6 +98,7 @@ impl Browser {
 mod tests {
     use super::*;
     use evezip_engine::ArchiveEntry;
+    use std::path::Path;
     use std::sync::Mutex;
 
     struct EngineFalso {

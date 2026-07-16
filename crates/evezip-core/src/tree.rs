@@ -32,10 +32,16 @@ impl ArchiveTree {
                     ..Node::default()
                 });
                 if ultimo {
-                    filho.is_dir = e.is_dir;
+                    // Um nó que já tem filhos (ex.: "a/b.txt" processado antes de "a")
+                    // é sempre diretório, mesmo que a entrada explícita diga is_dir=false.
+                    filho.is_dir = e.is_dir || !filho.children.is_empty();
                     filho.size = e.size;
                     filho.packed_size = e.packed_size;
                     filho.modified = e.modified.clone().unwrap_or_default();
+                } else {
+                    // Estamos descendo através deste nó para chegar a um filho:
+                    // ele precisa ser diretório, independentemente de entradas futuras.
+                    filho.is_dir = true;
                 }
                 atual = filho;
             }
@@ -124,5 +130,24 @@ mod tests {
     fn normaliza_separador_windows() {
         let t = ArchiveTree::build(&[e("src\\main.rs", false, 20)]);
         assert!(t.list_dir("src").is_some());
+    }
+
+    #[test]
+    fn arquivo_que_tambem_e_diretorio_vira_diretorio() {
+        // Alguns zips têm uma entrada "a" (arquivo) e também "a/b.txt".
+        // O nó "a" precisa virar diretório para que b.txt continue acessível.
+        for entradas in [
+            vec![e("a", false, 5), e("a/b.txt", false, 3)],
+            vec![e("a/b.txt", false, 3), e("a", false, 5)],
+        ] {
+            let t = ArchiveTree::build(&entradas);
+            let raiz = t.list_dir("").unwrap();
+            assert_eq!(raiz.len(), 1);
+            assert_eq!(raiz[0].name, "a");
+            assert!(raiz[0].is_dir, "nó com filhos deve ser tratado como diretório");
+            let dentro = t.list_dir("a").unwrap();
+            assert_eq!(dentro.len(), 1);
+            assert_eq!(dentro[0].name, "b.txt");
+        }
     }
 }
