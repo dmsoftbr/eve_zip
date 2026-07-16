@@ -35,8 +35,7 @@ fn main() {
 
 /// Extração sem UI: progresso percentual em stderr, exit code ≠ 0 em erro.
 fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Option<PathBuf>) {
-    let dest = dest
-        .unwrap_or_else(|| archive.parent().unwrap_or(std::path::Path::new(".")).to_path_buf());
+    let dest = cli::destino_padrao(&archive, dest);
     let mut ultimo = 0u8;
     let r = engine.extract(
         &archive,
