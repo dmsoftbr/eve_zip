@@ -27,10 +27,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           choco install 7zip -y
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           echo "EVEZIP_7ZZ=C:\Program Files\7-Zip\7z.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Formatação e lints
+        shell: bash
         run: |
           cargo fmt --check
           cargo clippy --workspace -- -D warnings
