@@ -113,6 +113,25 @@ fn extracao_seletiva_entry_com_nome_de_switch() {
 }
 
 #[test]
+fn extract_rejeita_entrada_com_traversal() {
+    // Defesa em profundidade (zip-slip): uma entrada selecionada com ".."
+    // nunca deve chegar ao 7zz — quem usa o destino (ex.: preview) faz
+    // `dest.join(entry)`, e um nome hostil apontaria para fora do destino.
+    let d = sandbox("traversal");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.zip");
+    let opts = CreateOptions { format: Format::Zip, level: 5, password: None, encrypt_names: false };
+    eng.create(&arq, &[d.join("in")], &opts, &mut |_| {}, &CancelToken::new()).unwrap();
+
+    let dest = d.join("traversal-out");
+    let err = eng
+        .extract(&arq, &dest, Some(&["../../../etc/passwd".into()]), None, &mut |_| {}, &CancelToken::new())
+        .unwrap_err();
+    assert!(matches!(err, EngineError::CaminhoInvalido(_)), "{err:?}");
+    assert!(!dest.exists(), "destino não deveria nem ser criado");
+}
+
+#[test]
 fn create_substitui_archive_existente_em_vez_de_acrescentar() {
     let d = sandbox("substitui");
     let eng = Engine::locate().unwrap();

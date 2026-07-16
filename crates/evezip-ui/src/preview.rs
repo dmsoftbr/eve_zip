@@ -19,6 +19,13 @@ pub fn abrir_preview(
     entry_path: &str,
     password: Option<&str>,
 ) -> Result<(), EngineError> {
+    // Defesa em profundidade (zip-slip): mesmo que o 7zz recuse a extração
+    // de uma entrada ".." em si, `dest.join(entry_path)` abaixo é o caminho
+    // que de fato abrimos — se `entry_path` contiver traversal, o alvo
+    // poderia apontar para fora do diretório temporário de preview.
+    if !evezip_engine::ops::entrada_segura(entry_path) {
+        return Err(EngineError::CaminhoInvalido(entry_path.to_string()));
+    }
     let dest = temp_root();
     std::fs::create_dir_all(&dest)?;
     engine.extract(
@@ -30,6 +37,15 @@ pub fn abrir_preview(
         &CancelToken::new(),
     )?;
     let alvo = dest.join(entry_path);
+    // Segunda camada, best-effort: se ambos canonicalizarem, o alvo precisa
+    // continuar dentro do destino. Se `alvo` não existir (extração falhou
+    // silenciosamente por algum motivo), não há o que canonicalizar — a
+    // checagem acima já barrou o caso hostil conhecido.
+    if let (Ok(alvo_canon), Ok(dest_canon)) = (alvo.canonicalize(), dest.canonicalize()) {
+        if !alvo_canon.starts_with(&dest_canon) {
+            return Err(EngineError::CaminhoInvalido(entry_path.to_string()));
+        }
+    }
     if std::env::var_os("EVEZIP_PREVIEW_NO_OPEN").is_none() {
         abrir_com_app_padrao(&alvo)?;
     }
@@ -92,5 +108,16 @@ mod tests {
         assert!(temp_root().join("sub/nota.txt").exists());
         limpar_temp();
         assert!(!temp_root().exists());
+    }
+
+    #[test]
+    fn rejeita_entry_path_com_traversal_antes_de_extrair() {
+        // Zip-slip: uma entrada "../../../foo" nunca deve chegar a extract()
+        // nem a dest.join() — o preview tem que barrar antes.
+        std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
+        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador { extraidos: Mutex::new(vec![]) });
+        let err = abrir_preview(&eng, Path::new("/x/a.7z"), "../../../etc/passwd", None).unwrap_err();
+        assert!(matches!(err, EngineError::CaminhoInvalido(_)), "{err:?}");
+        limpar_temp();
     }
 }

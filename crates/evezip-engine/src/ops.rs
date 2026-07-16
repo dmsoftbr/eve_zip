@@ -33,6 +33,29 @@ fn eh_targz(archive: &Path) -> bool {
     s.ends_with(".tar.gz") || s.ends_with(".tgz")
 }
 
+/// Verifica se um caminho de entrada de archive é seguro para ser usado com
+/// `dest.join(entry)`: nenhum componente pode ser ".." (zip-slip / path
+/// traversal) e o caminho não pode ser absoluto (raiz Unix "/" ou raiz de
+/// drive/UNC do Windows "C:\", "\\").
+///
+/// Defesa em profundidade: mesmo que o 7zz grave os arquivos com segurança
+/// dentro do destino, uma entrada "../../../foo" faria `dest.join(entry)`
+/// apontar para fora do destino pretendido nas camadas que usam esse join
+/// (ex.: preview).
+pub fn entrada_segura(entry: &str) -> bool {
+    if entry.starts_with('/') || entry.starts_with('\\') {
+        return false;
+    }
+    // Raiz de drive Windows, ex.: "C:\..." ou "C:/...".
+    let bytes = entry.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return false;
+    }
+    !entry
+        .split(['/', '\\'])
+        .any(|componente| componente == "..")
+}
+
 fn arg_senha(password: Option<&str>) -> OsString {
     // Sempre presente para o 7zz nunca abrir prompt interativo.
     let mut a = OsString::from("-p");
@@ -92,6 +115,15 @@ impl Engine {
             return self.com_tar_interno(archive, cancel, on_progress, |tar, on_progress| {
                 self.extract(tar, dest, entries, password, on_progress, cancel)
             });
+        }
+        if let Some(sel) = entries {
+            // Defesa em profundidade contra zip-slip: uma entrada com ".."
+            // ou caminho absoluto não deve nem chegar ao 7zz — quem usa o
+            // resultado (ex.: preview) faz `dest.join(entry)` e um nome
+            // hostil poderia apontar para fora do destino pretendido.
+            if let Some(inv) = sel.iter().find(|e| !entrada_segura(e)) {
+                return Err(EngineError::CaminhoInvalido(inv.clone()));
+            }
         }
         std::fs::create_dir_all(dest)?;
         let mut o = OsString::from("-o");
@@ -293,5 +325,53 @@ impl Engine {
         run_7zz(&self.bin, &args, on_progress, cancel)
             .map(|_| ())
             .map_err(|e| ajustar_erro_de_senha(e, password))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entrada_segura;
+
+    #[test]
+    fn caminho_normal_e_seguro() {
+        assert!(entrada_segura("src/main.rs"));
+    }
+
+    #[test]
+    fn caminho_unicode_e_seguro() {
+        assert!(entrada_segura("relatório/nota (ção).txt"));
+    }
+
+    #[test]
+    fn traversal_simples_e_inseguro() {
+        assert!(!entrada_segura("../etc"));
+    }
+
+    #[test]
+    fn traversal_no_meio_do_caminho_e_inseguro() {
+        assert!(!entrada_segura("a/../../b"));
+    }
+
+    #[test]
+    fn traversal_com_barra_invertida_e_inseguro() {
+        assert!(!entrada_segura("a\\..\\..\\b"));
+    }
+
+    #[test]
+    fn caminho_absoluto_unix_e_inseguro() {
+        assert!(!entrada_segura("/abs"));
+    }
+
+    #[test]
+    fn caminho_absoluto_windows_e_inseguro() {
+        assert!(!entrada_segura("C:\\Windows\\system.ini"));
+        assert!(!entrada_segura("\\\\servidor\\share\\arquivo"));
+    }
+
+    #[test]
+    fn nome_de_switch_continua_seguro() {
+        // "-y" não é traversal nem absoluto; a defesa de "--" na CLI já
+        // cobre a ambiguidade com switches do 7zz.
+        assert!(entrada_segura("-y"));
     }
 }

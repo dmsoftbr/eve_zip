@@ -11,6 +11,7 @@ pub enum EngineError {
     Io(std::io::Error),
     Falha { exit_code: i32, stderr: String },
     OpcaoNaoSuportada(String),
+    CaminhoInvalido(String),
 }
 
 impl fmt::Display for EngineError {
@@ -27,6 +28,7 @@ impl fmt::Display for EngineError {
                 write!(f, "7zz falhou (código {exit_code}): {stderr}")
             }
             Self::OpcaoNaoSuportada(d) => write!(f, "opção não suportada: {d}"),
+            Self::CaminhoInvalido(d) => write!(f, "caminho inválido no archive: {d}"),
         }
     }
 }
