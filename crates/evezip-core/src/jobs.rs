@@ -65,22 +65,30 @@ impl JobQueue {
                 let _ = ev.send(JobEvent::Progress(id, p));
             };
 
-            let resultado = match &spec.kind {
-                JobKind::Extract { archive, dest, entries, password } => engine.extract(
-                    archive,
-                    dest,
-                    entries.as_deref(),
-                    password.as_deref(),
-                    &mut on_progress,
-                    &cancel,
-                ),
-                JobKind::Create { archive, inputs, options } => {
-                    engine.create(archive, inputs, options, &mut on_progress, &cancel)
+            let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match &spec.kind {
+                    JobKind::Extract { archive, dest, entries, password } => engine.extract(
+                        archive,
+                        dest,
+                        entries.as_deref(),
+                        password.as_deref(),
+                        &mut on_progress,
+                        &cancel,
+                    ),
+                    JobKind::Create { archive, inputs, options } => {
+                        engine.create(archive, inputs, options, &mut on_progress, &cancel)
+                    }
+                    JobKind::Test { archive, password } => {
+                        engine.test(archive, password.as_deref(), &mut on_progress, &cancel)
+                    }
                 }
-                JobKind::Test { archive, password } => {
-                    engine.test(archive, password.as_deref(), &mut on_progress, &cancel)
-                }
-            };
+            }))
+            .unwrap_or_else(|_| {
+                Err(EngineError::Falha {
+                    exit_code: -1,
+                    stderr: "pânico interno no worker do job".into(),
+                })
+            });
 
             cancels.lock().unwrap().remove(&id);
             let _ = match resultado {
@@ -204,5 +212,56 @@ mod tests {
         q.submit(spec_extract());
         let dones = rx.iter().take(10).filter(|e| matches!(e, JobEvent::Done(_))).count();
         assert_eq!(dones, 2);
+    }
+
+    /// Engine cujo método `test` entra em pânico, para validar a guarda de pânico do worker.
+    struct EnginePanico;
+
+    impl ArchiveEngine for EnginePanico {
+        fn list(&self, _: &Path, _: Option<&str>) -> Result<Vec<ArchiveEntry>, EngineError> {
+            Ok(vec![])
+        }
+        fn extract(
+            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
+            _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn create(
+            &self, _: &Path, _: &[std::path::PathBuf], _: &CreateOptions,
+            _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn test(
+            &self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            panic!("boom no engine");
+        }
+    }
+
+    #[test]
+    fn panico_no_engine_emite_failed_e_limpa_cancel() {
+        let (tx, rx) = mpsc::channel();
+        let q = JobQueue::new(Arc::new(EnginePanico), tx);
+        let id = q.submit(JobSpec {
+            descricao: "testar".into(),
+            kind: JobKind::Test { archive: "/x/a.7z".into(), password: None },
+        });
+
+        let evs: Vec<JobEvent> = rx.iter().take(2).collect();
+        assert!(matches!(evs[0], JobEvent::Started(i) if i == id));
+        assert!(matches!(&evs[1], JobEvent::Failed(_, EngineError::Falha { exit_code, .. }) if *exit_code == -1));
+
+        // A entrada em `cancels` já foi removida (job terminou); cancelar depois
+        // não deve entrar em pânico nem travar.
+        q.cancel(id);
+
+        // A fila continua utilizável após o pânico de um worker anterior.
+        let (q2, rx2) = fila(false);
+        let id2 = q2.submit(spec_extract());
+        let evs2: Vec<JobEvent> = rx2.iter().take(5).collect();
+        assert!(matches!(evs2[0], JobEvent::Started(i) if i == id2));
+        assert!(matches!(evs2[4], JobEvent::Done(_)));
     }
 }
