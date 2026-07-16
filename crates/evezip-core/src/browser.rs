@@ -117,6 +117,24 @@ mod tests {
                 encrypted: false,
             }])
         }
+        fn extract(
+            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
+            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn create(
+            &self, _: &Path, _: &[std::path::PathBuf], _: &evezip_engine::CreateOptions,
+            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn test(
+            &self, _: &Path, _: Option<&str>,
+            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
     }
 
     #[test]
