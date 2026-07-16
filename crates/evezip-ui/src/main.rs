@@ -1,13 +1,24 @@
 mod app;
+mod cli;
 mod format;
 mod preview;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
-use evezip_core::{ArchiveEngine, JobQueue, Location};
+use evezip_core::{ArchiveEngine, Browser, JobQueue, Location};
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let comando = match cli::parse(&args) {
+        Ok(c) => c,
+        Err(uso) => {
+            eprintln!("{uso}");
+            std::process::exit(2);
+        }
+    };
+
     let engine = match evezip_engine::Engine::locate() {
         Ok(e) => Arc::new(e) as Arc<dyn ArchiveEngine>,
         Err(e) => {
@@ -15,9 +26,50 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let inicial = Location::Disk(
-        dirs_home().unwrap_or_else(|| std::path::PathBuf::from("/")),
+
+    match comando {
+        cli::Cli::Extrair { archive, dest } => extrair_headless(&engine, archive, dest),
+        cli::Cli::Abrir(caminho) => abrir_ui(engine, caminho),
+    }
+}
+
+/// Extração sem UI: progresso percentual em stderr, exit code ≠ 0 em erro.
+fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Option<PathBuf>) {
+    let dest = dest
+        .unwrap_or_else(|| archive.parent().unwrap_or(std::path::Path::new(".")).to_path_buf());
+    let mut ultimo = 0u8;
+    let r = engine.extract(
+        &archive,
+        &dest,
+        None,
+        None,
+        &mut |p| {
+            if p != ultimo {
+                ultimo = p;
+                eprint!("\r{p}%");
+            }
+        },
+        &evezip_engine::CancelToken::new(),
     );
+    eprintln!();
+    match r {
+        Ok(()) => println!("extraído em {}", dest.display()),
+        Err(e) => {
+            eprintln!("erro: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Abre a janela principal, opcionalmente já posicionada num archive ou pasta.
+fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
+    let inicial = match caminho {
+        Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => {
+            Location::Archive { archive: p, inner: String::new() }
+        }
+        Some(p) => Location::Disk(p),
+        None => Location::Disk(dirs_home().unwrap_or_else(|| PathBuf::from("/"))),
+    };
     let app = app::App::new(Arc::clone(&engine), inicial).expect("falha ao criar janela");
 
     // Mapa id → descrição do job, usado para preencher `JobRow.descricao`
@@ -46,8 +98,8 @@ fn main() {
     preview::limpar_temp();
 }
 
-fn dirs_home() -> Option<std::path::PathBuf> {
+fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
+        .map(PathBuf::from)
 }
