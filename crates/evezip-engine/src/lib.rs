@@ -3,6 +3,7 @@ pub mod entry;
 pub mod error;
 pub mod locate;
 pub mod parse_list;
+pub mod parse_progress;
 
 pub use entry::ArchiveEntry;
 pub use error::EngineError;
