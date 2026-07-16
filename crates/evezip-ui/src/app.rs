@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, Model, ModelRc, StandardListViewItem, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelRc, VecModel, Weak};
 
 use evezip_core::{
     ArchiveEngine, Browser, JobEvent, JobId, JobKind, JobQueue, JobSpec, Location, Row,
@@ -30,6 +30,9 @@ pub struct State {
     /// que fecha um diálogo (confirmar-sucesso, confirmar-erro-que-esconde,
     /// cancelar) deve resetá-la — um `true` vazado trava a UI para sempre.
     pub dialogo_aberto: bool,
+    /// Arquivos passados para comprimir na abertura (CLI `a <arquivos>`, usado
+    /// pela Quick Action do Finder). Vazio na abertura normal.
+    pub inputs_iniciais: Vec<std::path::PathBuf>,
 }
 
 impl State {
@@ -40,36 +43,33 @@ impl State {
     }
 }
 
-pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<ModelRc<StandardListViewItem>> {
-    let linhas: Vec<ModelRc<StandardListViewItem>> = rows
+pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<FileRow> {
+    let linhas: Vec<FileRow> = rows
         .iter()
         .map(|r| {
-            let nome = if r.is_dir {
-                format!("📁 {}", r.name)
+            // kind: 0 pasta, 1 archive, 2 arquivo comum — decide o ícone na UI.
+            let kind = if r.is_dir {
+                0
+            } else if Browser::is_archive_file(&r.name) {
+                1
             } else {
-                format!("📄 {}", r.name)
+                2
             };
-            let celulas: Vec<StandardListViewItem> = vec![
-                StandardListViewItem::from(nome.as_str()),
-                StandardListViewItem::from(
-                    if r.is_dir {
-                        "—".to_string()
-                    } else {
-                        tamanho_humano(r.size)
-                    }
-                    .as_str(),
-                ),
-                StandardListViewItem::from(
-                    if r.packed_size == 0 {
-                        "".to_string()
-                    } else {
-                        tamanho_humano(r.packed_size)
-                    }
-                    .as_str(),
-                ),
-                StandardListViewItem::from(r.modified.as_str()),
-            ];
-            ModelRc::new(VecModel::from(celulas))
+            FileRow {
+                name: r.name.as_str().into(),
+                size: if r.is_dir {
+                    "—".into()
+                } else {
+                    tamanho_humano(r.size).into()
+                },
+                packed: if r.packed_size == 0 {
+                    "".into()
+                } else {
+                    tamanho_humano(r.packed_size).into()
+                },
+                modified: r.modified.as_str().into(),
+                kind,
+            }
         })
         .collect();
     ModelRc::new(VecModel::from(linhas))
@@ -88,6 +88,7 @@ impl App {
             ultimo_clique: None,
             senha_do_archive: None,
             dialogo_aberto: false,
+            inputs_iniciais: Vec::new(),
         }));
         let app = App { window, state };
         app.recarregar();
@@ -340,113 +341,30 @@ impl App {
         let state3 = Rc::clone(&self.state);
         let weak4 = self.window.as_weak();
         self.window.on_adicionar(move || {
-            // Guarda contra diálogos empilhados: se um CreateDialog/PasswordDialog
-            // já está aberto (janela principal continua interativa), ignora o
-            // disparo em vez de abrir outro por cima.
-            if state3.borrow().dialogo_aberto {
-                if let Some(w) = weak4.upgrade() {
-                    w.set_status("Feche o diálogo aberto primeiro.".into());
-                }
-                return;
-            }
-
-            // 1. Escolher entradas (arquivos a compactar).
+            // Escolher entradas (arquivos a compactar) e abrir o diálogo.
             let Some(inputs) = rfd::FileDialog::new()
                 .set_title("Arquivos para compactar")
                 .pick_files()
             else {
                 return;
             };
-
-            // 2. Abrir o diálogo de opções de criação.
-            let dlg = CreateDialog::new().expect("dialog");
-            state3.borrow_mut().dialogo_aberto = true;
-            let dlg_weak = dlg.as_weak();
-            let q = Arc::clone(&q);
-            let descricoes = Arc::clone(&descricoes3);
-            let kinds = Arc::clone(&kinds3);
-            let dir_atual = match &state3.borrow().location {
-                Location::Disk(d) => d.clone(),
-                Location::Archive { archive, .. } => archive
-                    .parent()
-                    .unwrap_or(std::path::Path::new("/"))
-                    .to_path_buf(),
-            };
-
-            dlg.on_cancelar({
-                let w = dlg_weak.clone();
-                let state3 = Rc::clone(&state3);
-                move || {
-                    state3.borrow_mut().dialogo_aberto = false;
-                    if let Some(d) = w.upgrade() {
-                        let _ = d.hide();
-                    }
-                }
-            });
-
-            let state_confirmar = Rc::clone(&state3);
-            dlg.on_confirmar(move |formato, nivel, senha, criptografar_nomes| {
-                use evezip_engine::{CreateOptions, Format};
-                let (fmt, ext) = match formato.as_str() {
-                    "zip" => (Format::Zip, "zip"),
-                    "tar" => (Format::Tar, "tar"),
-                    "tar.gz" => (Format::TarGz, "tar.gz"),
-                    _ => (Format::SevenZ, "7z"),
-                };
-                let sugestao = format!("novo.{ext}");
-                let Some(destino) = rfd::FileDialog::new()
-                    .set_title("Salvar archive como...")
-                    .set_directory(&dir_atual)
-                    .set_file_name(&sugestao)
-                    .save_file()
-                else {
-                    // Diálogo de destino cancelado: o CreateDialog continua
-                    // aberto, então a flag permanece true.
-                    return;
-                };
-                // O 7zz (via evezip-engine::ops::create) rejeita senha em
-                // tar/tar.gz com `OpcaoNaoSuportada` — o diálogo já desabilita
-                // os campos de senha/nomes para esses formatos, mas isso é
-                // reforçado aqui em defesa de profundidade (o campo poderia
-                // reter texto de uma seleção anterior de formato).
-                let eh_tar = matches!(fmt, Format::Tar | Format::TarGz);
-                let password = if eh_tar {
-                    None
-                } else {
-                    (!senha.is_empty()).then(|| senha.to_string())
-                };
-                let encrypt_names = criptografar_nomes && fmt == Format::SevenZ;
-                submeter(
-                    &q,
-                    &descricoes,
-                    &kinds,
-                    JobSpec {
-                        descricao: format!(
-                            "Criar {}",
-                            destino
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_default()
-                        ),
-                        kind: JobKind::Create {
-                            archive: destino,
-                            inputs: inputs.clone(),
-                            options: CreateOptions {
-                                format: fmt,
-                                level: nivel as u8,
-                                password,
-                                encrypt_names,
-                            },
-                        },
-                    },
-                );
-                state_confirmar.borrow_mut().dialogo_aberto = false;
-                if let Some(d) = dlg_weak.upgrade() {
-                    let _ = d.hide();
-                }
-            });
-            let _ = dlg.show();
+            abrir_dialogo_criar(&state3, &weak4, &q, &descricoes3, &kinds3, inputs);
         });
+
+        // Se o app foi aberto para comprimir (CLI `a <arquivos>`, usado pela
+        // Quick Action "Comprimir com EveZip" do Finder), abre o diálogo de
+        // criação já com esses arquivos, logo após a janela aparecer.
+        let iniciais = self.state.borrow().inputs_iniciais.clone();
+        if !iniciais.is_empty() {
+            let state = Rc::clone(&self.state);
+            let weak = self.window.as_weak();
+            let q = Arc::clone(&queue);
+            let descricoes = Arc::clone(&descricoes);
+            let kinds = Arc::clone(&kinds);
+            slint::Timer::single_shot(std::time::Duration::from_millis(250), move || {
+                abrir_dialogo_criar(&state, &weak, &q, &descricoes, &kinds, iniciais);
+            });
+        }
 
         let q_senha = Arc::clone(&queue);
         let descricoes_senha = Arc::clone(&descricoes);
@@ -568,6 +486,110 @@ fn nome_de(p: &std::path::Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Abre o `CreateDialog` para compactar `inputs`: pede formato/nível/senha e,
+/// na confirmação, pergunta onde salvar (padrão: pasta do primeiro input) e
+/// submete o job de criação. Usado tanto pelo botão "Adicionar" quanto pela
+/// abertura via CLI `a <arquivos>` (Quick Action do Finder).
+fn abrir_dialogo_criar(
+    state: &Rc<std::cell::RefCell<State>>,
+    weak: &Weak<AppWindow>,
+    q: &Arc<JobQueue>,
+    descricoes: &Arc<Mutex<HashMap<JobId, String>>>,
+    kinds: &Arc<Mutex<HashMap<JobId, JobKind>>>,
+    inputs: Vec<std::path::PathBuf>,
+) {
+    if inputs.is_empty() {
+        return;
+    }
+    // Guarda contra diálogos empilhados.
+    if state.borrow().dialogo_aberto {
+        if let Some(w) = weak.upgrade() {
+            w.set_status("Feche o diálogo aberto primeiro.".into());
+        }
+        return;
+    }
+    // Pasta onde o archive será salvo por padrão: a do primeiro item.
+    let dir_atual = inputs[0]
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let dlg = CreateDialog::new().expect("dialog");
+    state.borrow_mut().dialogo_aberto = true;
+    let dlg_weak = dlg.as_weak();
+
+    dlg.on_cancelar({
+        let w = dlg_weak.clone();
+        let state = Rc::clone(state);
+        move || {
+            state.borrow_mut().dialogo_aberto = false;
+            if let Some(d) = w.upgrade() {
+                let _ = d.hide();
+            }
+        }
+    });
+
+    let q = Arc::clone(q);
+    let descricoes = Arc::clone(descricoes);
+    let kinds = Arc::clone(kinds);
+    let state_confirmar = Rc::clone(state);
+    dlg.on_confirmar(move |formato, nivel, senha, criptografar_nomes| {
+        use evezip_engine::{CreateOptions, Format};
+        let (fmt, ext) = match formato.as_str() {
+            "zip" => (Format::Zip, "zip"),
+            "tar" => (Format::Tar, "tar"),
+            "tar.gz" => (Format::TarGz, "tar.gz"),
+            _ => (Format::SevenZ, "7z"),
+        };
+        // Sugestão de nome: nome do primeiro item (sem extensão) + formato.
+        let base = inputs[0]
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "novo".into());
+        let sugestao = format!("{base}.{ext}");
+        let Some(destino) = rfd::FileDialog::new()
+            .set_title("Salvar archive como...")
+            .set_directory(&dir_atual)
+            .set_file_name(&sugestao)
+            .save_file()
+        else {
+            // Destino cancelado: o CreateDialog continua aberto (flag mantida).
+            return;
+        };
+        // tar/tar.gz não suportam senha (o engine rejeita); reforço aqui.
+        let eh_tar = matches!(fmt, Format::Tar | Format::TarGz);
+        let password = if eh_tar {
+            None
+        } else {
+            (!senha.is_empty()).then(|| senha.to_string())
+        };
+        let encrypt_names = criptografar_nomes && fmt == Format::SevenZ;
+        submeter(
+            &q,
+            &descricoes,
+            &kinds,
+            JobSpec {
+                descricao: format!("Criar {}", nome_de(&destino)),
+                kind: JobKind::Create {
+                    archive: destino,
+                    inputs: inputs.clone(),
+                    options: CreateOptions {
+                        format: fmt,
+                        level: nivel as u8,
+                        password,
+                        encrypt_names,
+                    },
+                },
+            },
+        );
+        state_confirmar.borrow_mut().dialogo_aberto = false;
+        if let Some(d) = dlg_weak.upgrade() {
+            let _ = d.hide();
+        }
+    });
+    let _ = dlg.show();
 }
 
 /// Abre o `PasswordDialog` para um job de extração/teste que falhou por senha

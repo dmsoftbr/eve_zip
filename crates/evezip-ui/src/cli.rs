@@ -7,6 +7,9 @@ pub enum Cli {
         archive: PathBuf,
         dest: Option<PathBuf>,
     },
+    /// Abre o app com o diálogo de criação preenchido com estes arquivos
+    /// (usado pela Quick Action "Comprimir com EveZip" do Finder).
+    Comprimir(Vec<PathBuf>),
 }
 
 /// Destino padrão de `evezip x <archive>` quando `-o` não é informado.
@@ -38,8 +41,14 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
             }),
             _ => Err("uso: evezip x <archive> [-o <destino>]".into()),
         },
+        [cmd, resto @ ..] if cmd == "a" && !resto.is_empty() => {
+            Ok(Cli::Comprimir(resto.iter().map(PathBuf::from).collect()))
+        }
         [caminho] => Ok(Cli::Abrir(Some(caminho.into()))),
-        _ => Err("uso: evezip [<archive>] | evezip x <archive> [-o <destino>]".into()),
+        _ => Err(
+            "uso: evezip [<archive>] | evezip x <archive> [-o <destino>] | evezip a <arquivos...>"
+                .into(),
+        ),
     }
 }
 
@@ -86,6 +95,24 @@ mod tests {
     fn x_sem_archive_da_erro() {
         assert!(parse(&v(&["x"])).is_err());
         assert!(parse(&v(&["x", "/a.7z", "-o"])).is_err());
+    }
+
+    #[test]
+    fn a_comprime_arquivos() {
+        assert_eq!(
+            parse(&v(&["a", "/x/f1.txt", "/x/f2.txt"])).unwrap(),
+            Cli::Comprimir(vec!["/x/f1.txt".into(), "/x/f2.txt".into()])
+        );
+        assert_eq!(
+            parse(&v(&["a", "/x/pasta"])).unwrap(),
+            Cli::Comprimir(vec!["/x/pasta".into()])
+        );
+    }
+
+    #[test]
+    fn a_sem_arquivos_nao_e_comprimir() {
+        // "a" sozinho não é comando de compressão — cai em Abrir(Some("a")).
+        assert_eq!(parse(&v(&["a"])).unwrap(), Cli::Abrir(Some("a".into())));
     }
 
     #[test]

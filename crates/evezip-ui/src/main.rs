@@ -33,7 +33,17 @@ fn main() {
 
     match comando {
         cli::Cli::Extrair { archive, dest } => extrair_headless(&engine, archive, dest),
-        cli::Cli::Abrir(caminho) => abrir_ui(engine, caminho),
+        cli::Cli::Abrir(caminho) => abrir_ui(engine, caminho, Vec::new()),
+        cli::Cli::Comprimir(inputs) => {
+            // Abre no diretório do primeiro item; o diálogo de criação abre
+            // sozinho com esses arquivos (ver App::instalar_fila).
+            let dir = inputs
+                .first()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs_home().unwrap_or_else(|| PathBuf::from("/")));
+            abrir_ui(engine, Some(dir), inputs);
+        }
     }
 }
 
@@ -65,7 +75,13 @@ fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Opt
 }
 
 /// Abre a janela principal, opcionalmente já posicionada num archive ou pasta.
-fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
+/// `inputs_comprimir` não-vazio faz o diálogo de criação abrir com esses
+/// arquivos assim que a janela aparecer (fluxo "Comprimir com EveZip").
+fn abrir_ui(
+    engine: Arc<dyn ArchiveEngine>,
+    caminho: Option<PathBuf>,
+    inputs_comprimir: Vec<PathBuf>,
+) {
     let config = Config::load();
     let inicial = match caminho {
         Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => Location::Archive {
@@ -78,6 +94,7 @@ fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
         None => Location::Disk(pasta_inicial(&config)),
     };
     let app = app::App::new(Arc::clone(&engine), inicial).expect("falha ao criar janela");
+    app.state.borrow_mut().inputs_iniciais = inputs_comprimir;
 
     // Mapa id → descrição do job, usado para preencher `JobRow.descricao`
     // quando o evento `Started` chega (ele só carrega o id). Instância única,

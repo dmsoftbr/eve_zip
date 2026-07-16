@@ -1,0 +1,32 @@
+// Tokens de design do EveZip. Direção: "ferramenta de precisão para
+// archives" — quase-preto frio, um único acento âmbar (embalagem/kraft),
+// dados em monoespaçada. Um acento só; o resto é contido.
+export global Theme {
+    // Superfícies
+    out property <color> bg: #14161b;          // fundo da janela / lista
+    out property <color> panel: #1b1e25;       // toolbar / status / fila
+    out property <color> elevated: #232732;     // hover
+    out property <color> sel: #2b3040;          // linha selecionada
+    out property <color> hairline: #2a2f39;     // divisórias de 1px
+
+    // Texto
+    out property <color> text: #e7eaf0;
+    out property <color> muted: #98a1b1;
+    out property <color> faint: #69707e;
+
+    // Acento (âmbar) — pastas, archives, progresso, foco
+    out property <color> accent: #e6a24b;
+    out property <color> accent-strong: #f2b459;
+    out property <color> on-accent: #17130a;    // texto sobre o âmbar
+
+    // Ícone de arquivo comum (não-archive)
+    out property <color> file-icon: #8a93a5;
+
+    // Estados
+    out property <color> ok: #6fbf73;
+    out property <color> danger: #e5735b;
+
+    // Métricas / tipografia
+    out property <length> radius: 7px;
+    out property <string> mono: "Menlo";
+}

@@ -89,3 +89,14 @@ A spec original pedia AppImage para Linux. A v1 entrega tarball manual +
 `.desktop` (suficiente para uso interno). AppImage via `linuxdeploy` fica
 como melhoria futura, quando houver máquina Linux de referência disponível
 para validar o empacotamento.
+
+## macOS — "Comprimir com EveZip" no menu do Finder (Quick Action)
+
+Depois de instalar o `EveZip.app` em `/Applications`, rode:
+
+    ./packaging/macos/instalar-quick-action.sh
+
+Isso copia a Quick Action para `~/Library/Services/` e atualiza o cache de
+Serviços. Clique com o botão direito em um ou mais arquivos/pastas no Finder →
+**Comprimir com EveZip** (aparece em "Ações Rápidas" ou no submenu "Serviços").
+O EveZip abre com o diálogo de criação já preenchido com a seleção.

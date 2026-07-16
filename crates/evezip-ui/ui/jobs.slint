@@ -1,35 +1,94 @@
-import { Button, ListView, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
 
 export struct JobRow {
     id: int,
     descricao: string,
     progresso: int,   // 0-100
-    estado: string,   // "executando" | "concluído" | "erro: ..." | "cancelado"
+    estado: string,   // "executando" | "concluído" | "erro: ..." | "cancelado" | "aguardando senha"
+}
+
+// Cor do texto de estado conforme o resultado do job.
+component EstadoText inherits Text {
+    in property <string> estado;
+    text: root.estado;
+    font-size: 12px;
+    vertical-alignment: center;
+    horizontal-alignment: right;
+    color: root.estado == "concluído" ? Theme.ok : (root.estado == "executando" ? Theme.muted : (root.estado == "cancelado" ? Theme.faint : (root.estado == "aguardando senha" ? Theme.accent : Theme.danger)));
 }
 
 export component JobsPanel inherits Rectangle {
     in property <[JobRow]> jobs;
     callback cancelar(int);
 
-    height: jobs.length == 0 ? 0px : min(jobs.length, 3) * 44px + 8px;
-    background: #00000010;
+    height: root.jobs.length == 0 ? 0px : min(root.jobs.length, 3) * 40px + 9px;
+    background: Theme.panel;
+
+    // Divisória superior (some junto com o painel quando vazio).
+    Rectangle {
+        y: 0;
+        height: root.jobs.length == 0 ? 0px : 1px;
+        background: Theme.hairline;
+    }
 
     ListView {
-        for job in root.jobs: HorizontalBox {
-            height: 44px;
-            Text { text: job.descricao; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
-            Rectangle {
-                width: 180px; height: 10px; border-radius: 5px; background: #00000020;
-                Rectangle {
-                    x: 0; height: parent.height; border-radius: 5px;
-                    width: parent.width * job.progresso / 100;
-                    background: #3b82f6;
+        y: 5px;
+        height: parent.height - 5px;
+        for job in root.jobs: Rectangle {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 10px;
+                Text {
+                    text: job.descricao;
+                    color: Theme.text;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
                 }
-            }
-            Text { text: job.estado; vertical-alignment: center; width: 110px; }
-            if job.estado == "executando": Button {
-                text: "✕"; width: 32px;
-                clicked => { root.cancelar(job.id); }
+                // Barra de progresso
+                Rectangle {
+                    width: 160px;
+                    height: 6px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    background: Theme.elevated;
+                    Rectangle {
+                        x: 0;
+                        height: parent.height;
+                        width: parent.width * job.progresso / 100;
+                        border-radius: 3px;
+                        background: Theme.accent;
+                        animate width { duration: 120ms; }
+                    }
+                }
+                EstadoText {
+                    estado: job.estado;
+                    width: 118px;
+                }
+                // Cancelar (só enquanto executa)
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 6px;
+                    background: cancel-ta.has-hover ? Theme.elevated : transparent;
+                    visible: job.estado == "executando";
+                    Image {
+                        width: 15px;
+                        height: 15px;
+                        source: @image-url("assets/icons/x.svg");
+                        colorize: cancel-ta.has-hover ? Theme.danger : Theme.faint;
+                    }
+                    cancel-ta := TouchArea {
+                        clicked => {
+                            root.cancelar(job.id);
+                        }
+                    }
+                }
             }
         }
     }
