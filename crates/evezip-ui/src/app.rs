@@ -100,6 +100,8 @@ impl App {
         let mut s = self.state.borrow_mut();
         let senha = s.senha_do_archive.clone();
         let loc = s.location.clone();
+        self.window
+            .set_em_archive(matches!(loc, Location::Archive { .. }));
         match s.browser.list(&loc, senha.as_deref()) {
             Ok(rows) => {
                 self.window.set_caminho(loc.display().into());
@@ -136,35 +138,20 @@ impl App {
                 if !duplo {
                     return;
                 }
+                // Arquivo dentro de um archive: preview via app padrão do SO em
+                // vez de navegar (Task 14) — mesmo caminho do menu "Ver".
+                {
+                    let s = state.borrow();
+                    let Some(r) = s.rows.get(row as usize) else { return };
+                    if matches!(s.location, Location::Archive { .. }) && !r.is_dir {
+                        drop(s);
+                        preview_entrada(&state, &weak, row);
+                        return;
+                    }
+                }
                 let (loc, nova) = {
                     let s = state.borrow();
                     let Some(r) = s.rows.get(row as usize) else { return };
-                    // Arquivo dentro de um archive: preview via app padrão do
-                    // SO em vez de navegar (Task 14). `browser.enter` devolve
-                    // a própria location nesse caso (dead-end), então
-                    // intercepta antes de chegar lá.
-                    if let Location::Archive { archive, inner } = &s.location {
-                        if !r.is_dir {
-                            let entrada = if inner.is_empty() {
-                                r.name.clone()
-                            } else {
-                                format!("{inner}/{}", r.name)
-                            };
-                            let archive = archive.clone();
-                            let senha = s.senha_do_archive.clone();
-                            let eng = s.browser_engine();
-                            let res = crate::preview::abrir_preview(
-                                &eng,
-                                &archive,
-                                &entrada,
-                                senha.as_deref(),
-                            );
-                            if let (Err(e), Some(w)) = (res, weak.upgrade()) {
-                                w.set_status(format!("Erro no preview: {e}").into());
-                            }
-                            return;
-                        }
-                    }
                     let nova = s.browser.enter(&s.location, &r.name, r.is_dir);
                     (s.location.clone(), nova)
                 };
@@ -220,11 +207,21 @@ impl App {
             }
         });
 
-        // extrair/testar ganham corpo em `instalar_fila` (chamado pelo main.rs
-        // após a fila de jobs existir). adicionar ganha corpo na Task 13.
+        // Menu de contexto → "Ver": preview de um item específico (por índice).
+        self.window.on_ver_entrada({
+            let state = Rc::clone(&state);
+            let weak = weak.clone();
+            move |idx| {
+                preview_entrada(&state, &weak, idx);
+            }
+        });
+
+        // extrair/testar/extrair-entrada ganham corpo em `instalar_fila`
+        // (precisam da fila de jobs). adicionar idem.
         self.window.on_extrair(|| {});
         self.window.on_adicionar(|| {});
         self.window.on_testar(|| {});
+        self.window.on_extrair_entrada(|_| {});
     }
 
     pub fn window_weak(&self) -> Weak<AppWindow> {
@@ -333,6 +330,15 @@ impl App {
                     },
                 );
             }
+        });
+
+        // Menu de contexto → "Extrair…": extrai só o item apontado (por índice).
+        let q_ext = Arc::clone(&queue);
+        let descricoes_ext = Arc::clone(&descricoes);
+        let kinds_ext = Arc::clone(&kinds);
+        let state_ext = Rc::clone(&self.state);
+        self.window.on_extrair_entrada(move |idx| {
+            extrair_entrada(&state_ext, &q_ext, &descricoes_ext, &kinds_ext, idx);
         });
 
         let q = Arc::clone(&queue);
@@ -744,11 +750,102 @@ pub fn abrir_caminho_externo(
     }
 }
 
+/// Preview de um item (por índice) dentro do archive atual: extrai só ele e
+/// abre no app padrão do SO. Ignora pastas e caminhos fora de archive.
+fn preview_entrada(state: &Rc<std::cell::RefCell<State>>, weak: &Weak<AppWindow>, idx: i32) {
+    let (eng, archive, entrada, senha) = {
+        let s = state.borrow();
+        let Some(r) = s.rows.get(idx as usize) else {
+            return;
+        };
+        if r.is_dir {
+            return;
+        }
+        let Location::Archive { archive, inner } = &s.location else {
+            return;
+        };
+        let entrada = if inner.is_empty() {
+            r.name.clone()
+        } else {
+            format!("{inner}/{}", r.name)
+        };
+        (
+            s.browser_engine(),
+            archive.clone(),
+            entrada,
+            s.senha_do_archive.clone(),
+        )
+    };
+    let res = crate::preview::abrir_preview(&eng, &archive, &entrada, senha.as_deref());
+    if let (Err(e), Some(w)) = (res, weak.upgrade()) {
+        w.set_status(format!("Erro no preview: {e}").into());
+    }
+}
+
+/// Extrai só o item apontado (por índice): dentro de um archive, extrai aquela
+/// entrada; no disco, extrai o archive selecionado. Pergunta a pasta destino.
+fn extrair_entrada(
+    state: &Rc<std::cell::RefCell<State>>,
+    q: &Arc<JobQueue>,
+    descricoes: &Arc<Mutex<HashMap<JobId, String>>>,
+    kinds: &Arc<Mutex<HashMap<JobId, JobKind>>>,
+    idx: i32,
+) {
+    let (archive, senha, entradas, nome_item) = {
+        let s = state.borrow();
+        let Some(r) = s.rows.get(idx as usize) else {
+            return;
+        };
+        match &s.location {
+            Location::Archive { archive, inner } => {
+                let caminho = if inner.is_empty() {
+                    r.name.clone()
+                } else {
+                    format!("{inner}/{}", r.name)
+                };
+                (
+                    archive.clone(),
+                    s.senha_do_archive.clone(),
+                    Some(vec![caminho]),
+                    r.name.clone(),
+                )
+            }
+            Location::Disk(dir) => {
+                if !Browser::is_archive_file(&r.name) {
+                    return;
+                }
+                (dir.join(&r.name), None, None, r.name.clone())
+            }
+        }
+    };
+    let Some(dest) = rfd::FileDialog::new()
+        .set_title("Extrair para...")
+        .pick_folder()
+    else {
+        return;
+    };
+    submeter(
+        q,
+        descricoes,
+        kinds,
+        JobSpec {
+            descricao: format!("Extrair {nome_item}"),
+            kind: JobKind::Extract {
+                archive,
+                dest,
+                entries: entradas,
+                password: senha,
+            },
+        },
+    );
+}
+
 /// Recarga usada de dentro dos callbacks (sem &self).
 pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
     let mut s = state.borrow_mut();
     let senha = s.senha_do_archive.clone();
     let loc = s.location.clone();
+    w.set_em_archive(matches!(loc, Location::Archive { .. }));
     match s.browser.list(&loc, senha.as_deref()) {
         Ok(rows) => {
             w.set_caminho(loc.display().into());

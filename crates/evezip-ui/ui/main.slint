@@ -79,7 +79,10 @@ component IconButton inherits Rectangle {
 component FileRowItem inherits Rectangle {
     in property <FileRow> entry;
     in property <bool> selected;
+    in property <bool> em-archive; // true quando navegando dentro de um archive
     callback clicked;
+    callback ver;      // menu de contexto: visualizar este item
+    callback extrair;  // menu de contexto: extrair este item
 
     height: 30px;
     background: root.selected ? Theme.sel : (ta.has-hover ? Theme.elevated : transparent);
@@ -87,67 +90,89 @@ component FileRowItem inherits Rectangle {
 
     property <image> icone: root.entry.kind == 0 ? @image-url("assets/icons/folder.svg") : root.entry.kind == 1 ? @image-url("assets/icons/file-archive.svg") : @image-url("assets/icons/file-text.svg");
     property <color> cor-icone: root.entry.kind == 2 ? Theme.file-icon : Theme.accent;
+    // Só há menu quando há ação aplicável: dentro de um archive (ver/extrair),
+    // ou um arquivo-archive no disco (extrair).
+    property <bool> tem-menu: root.em-archive || root.entry.kind == 1;
 
-    // Barra de acento na seleção.
-    Rectangle {
-        x: 0;
-        width: 2px;
-        background: root.selected ? Theme.accent : transparent;
-    }
+    ContextMenuArea {
+        enabled: root.tem-menu;
 
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 14px;
-        spacing: 0px;
-        // Slot fixo do ícone (mantém o texto colado logo à direita).
+        // Barra de acento na seleção.
         Rectangle {
-            width: 24px;
-            Image {
-                width: 16px;
-                height: 16px;
-                source: root.icone;
-                colorize: root.cor-icone;
+            x: 0;
+            width: 2px;
+            background: root.selected ? Theme.accent : transparent;
+        }
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 14px;
+            spacing: 0px;
+            // Slot fixo do ícone (mantém o texto colado logo à direita).
+            Rectangle {
+                width: 24px;
+                Image {
+                    width: 16px;
+                    height: 16px;
+                    source: root.icone;
+                    colorize: root.cor-icone;
+                }
+            }
+            Text {
+                text: root.entry.name;
+                color: Theme.text;
+                font-size: 13px;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.entry.size;
+                width: 96px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.entry.packed;
+                width: 96px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.faint;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.entry.modified;
+                width: 150px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.faint;
+                vertical-alignment: center;
             }
         }
-        Text {
-            text: root.entry.name;
-            color: Theme.text;
-            font-size: 13px;
-            overflow: elide;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
+        ta := TouchArea {
+            clicked => {
+                root.clicked();
+            }
         }
-        Text {
-            text: root.entry.size;
-            width: 96px;
-            horizontal-alignment: right;
-            font-family: Theme.mono;
-            font-size: 12px;
-            color: Theme.muted;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.entry.packed;
-            width: 96px;
-            horizontal-alignment: right;
-            font-family: Theme.mono;
-            font-size: 12px;
-            color: Theme.faint;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.entry.modified;
-            width: 150px;
-            horizontal-alignment: right;
-            font-family: Theme.mono;
-            font-size: 12px;
-            color: Theme.faint;
-            vertical-alignment: center;
-        }
-    }
-    ta := TouchArea {
-        clicked => {
-            root.clicked();
+
+        Menu {
+            if root.em-archive && root.entry.kind != 0: MenuItem {
+                title: "Ver";
+                activated => {
+                    root.ver();
+                }
+            }
+            if root.tem-menu: MenuItem {
+                title: "Extrair…";
+                activated => {
+                    root.extrair();
+                }
+            }
         }
     }
 }
@@ -214,6 +239,7 @@ export component AppWindow inherits Window {
     in property <string> caminho;
     in property <string> status;
     in property <[JobRow]> jobs;
+    in property <bool> em-archive; // navegando dentro de um archive?
 
     callback linha-click(int);   // clique numa linha (Rust decide duplo-clique)
     callback subir();
@@ -221,6 +247,9 @@ export component AppWindow inherits Window {
     callback adicionar();
     callback testar();
     callback cancelar-job(int);
+    // Menu de contexto de uma linha (por índice): ver / extrair só aquele item.
+    callback ver-entrada(int);
+    callback extrair-entrada(int);
     // Disparado pelo Rust quando um job de extração/teste falha por senha:
     // (id-do-job, senha-estava-incorreta).
     callback pedir-senha-job(int, bool);
@@ -312,9 +341,16 @@ export component AppWindow inherits Window {
             for entry[idx] in root.rows: FileRowItem {
                 entry: entry;
                 selected: idx == root.selecionada;
+                em-archive: root.em-archive;
                 clicked => {
                     root.selecionada = idx;
                     root.linha-click(idx);
+                }
+                ver => {
+                    root.ver-entrada(idx);
+                }
+                extrair => {
+                    root.extrair-entrada(idx);
                 }
             }
         }
