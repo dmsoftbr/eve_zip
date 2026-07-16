@@ -586,15 +586,22 @@ fn pedir_senha_e_reenviar_job(
     id: JobId,
     incorreta: bool,
 ) {
-    // Guarda contra diálogos empilhados: se já há um diálogo aberto, ignora.
-    if state.borrow().dialogo_aberto {
-        return;
-    }
-    // Recupera o molde do job falho e o remove do mapa (o reenvio cria um id
-    // novo, que `submeter` registra de novo).
+    // Recupera o molde do job falho e o remove do mapa PRIMEIRO — assim a
+    // entrada nunca vaza, mesmo que não seja possível abrir o diálogo agora.
+    // O reenvio cria um id novo, que `submeter` registra de novo.
     let Some(kind) = kinds.lock().unwrap().remove(&id) else {
         return;
     };
+    // Guarda contra diálogos empilhados: se já há um diálogo aberto (ex.: uma
+    // senha de navegação em curso), avisa e não empilha outro. O job fica
+    // marcado "aguardando senha"; o usuário refaz a ação depois de fechar o
+    // diálogo aberto (um novo job então pede a senha normalmente).
+    if state.borrow().dialogo_aberto {
+        if let Some(w) = weak.upgrade() {
+            w.set_status("Feche o diálogo de senha aberto e tente novamente.".into());
+        }
+        return;
+    }
 
     let dlg = PasswordDialog::new().expect("dialog");
     dlg.set_mensagem(if incorreta {
@@ -620,7 +627,6 @@ fn pedir_senha_e_reenviar_job(
     let descricoes = Arc::clone(descricoes);
     let kinds = Arc::clone(kinds);
     let state = Rc::clone(state);
-    let _ = weak; // reservado para futuros usos (ex.: status na janela).
     dlg.on_confirmar(move |senha| {
         let senha = senha.to_string();
         // Injeta a senha no molde do job e monta uma descrição fresca (a antiga
