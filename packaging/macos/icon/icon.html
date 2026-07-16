@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>html,body{margin:0;background:#0000}</style></head>
+<body>
+<canvas id="c" width="1024" height="1024"></canvas>
+<script>
+const S = 1024;
+const ctx = document.getElementById('c').getContext('2d');
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+
+// Fundo squircle com gradiente escuro frio.
+const bg = ctx.createLinearGradient(0, 0, 0, S);
+bg.addColorStop(0, '#242833');
+bg.addColorStop(1, '#12141a');
+rr(0, 0, S, S, 232);
+ctx.fillStyle = bg;
+ctx.fill();
+
+// Brilho sutil no topo.
+const gloss = ctx.createLinearGradient(0, 0, 0, S * 0.5);
+gloss.addColorStop(0, 'rgba(255,255,255,0.06)');
+gloss.addColorStop(1, 'rgba(255,255,255,0)');
+rr(0, 0, S, S, 232);
+ctx.fillStyle = gloss;
+ctx.fill();
+
+// Caixa/pacote em âmbar.
+const bx = 300, by = 286, bw = 424, bh = 452, br = 54;
+const amber = ctx.createLinearGradient(0, by, 0, by + bh);
+amber.addColorStop(0, '#f4bd6a');
+amber.addColorStop(1, '#df9036');
+rr(bx, by, bw, bh, br);
+ctx.fillStyle = amber;
+ctx.fill();
+
+// Canal do zíper (vertical, escuro) no centro da caixa.
+const cx = bx + bw / 2;
+const chW = 44;
+const chTop = by + 30, chBot = by + bh - 30;
+const dark = '#14161b';
+rr(cx - chW / 2, chTop, chW, chBot - chTop, 22);
+ctx.fillStyle = dark;
+ctx.fill();
+
+// Dentes do zíper: traços âmbar curtos, alternando os lados sobre o canal.
+ctx.fillStyle = '#f4bd6a';
+const teethTop = chTop + 40, teethBot = chBot - 40, step = 34, tw = 66, th = 13;
+let i = 0;
+for (let y = teethTop; y <= teethBot; y += step) {
+  const off = (i % 2 === 0) ? -9 : 9;
+  rr(cx - tw / 2 + off, y - th / 2, tw, th, 6);
+  ctx.fill();
+  i++;
+}
+
+// Cursor (pull) do zíper: bloco escuro com anel âmbar, ~40% descendo.
+const py = by + bh * 0.44;
+rr(cx - 46, py - 40, 92, 96, 22);
+ctx.fillStyle = dark;
+ctx.fill();
+// anel
+ctx.beginPath();
+ctx.arc(cx, py + 4, 20, 0, Math.PI * 2);
+ctx.lineWidth = 12;
+ctx.strokeStyle = '#f4bd6a';
+ctx.stroke();
+// haste do puxador
+rr(cx - 9, py + 40, 18, 44, 8);
+ctx.fillStyle = dark;
+ctx.fill();
+
+// expõe o PNG
+window.__png = document.getElementById('c').toDataURL('image/png');
+</script>
+</body>
+</html>
