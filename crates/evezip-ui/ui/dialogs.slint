@@ -49,12 +49,13 @@ export component PasswordDialog inherits Window {
     height: 150px;
 
     in property <string> mensagem: "Este archive exige senha.";
+    in-out property <string> senha-texto;
     callback confirmar(string);
     callback cancelar();
 
     VerticalBox {
         Text { text: root.mensagem; wrap: word-wrap; }
-        senha := LineEdit { input-type: password; placeholder-text: "Senha"; }
+        senha := LineEdit { input-type: password; placeholder-text: "Senha"; text <=> root.senha-texto; }
         HorizontalBox {
             Button { text: "Cancelar"; clicked => { root.cancelar(); } }
             Button { text: "OK"; primary: true; clicked => { root.confirmar(senha.text); } }

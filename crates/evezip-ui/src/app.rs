@@ -22,6 +22,12 @@ pub struct State {
     pub rows: Vec<Row>,
     pub ultimo_clique: Option<(i32, Instant)>,
     pub senha_do_archive: Option<String>, // preenchida pelo fluxo de senha (Task 13)
+    /// Guarda contra diálogos empilhados: true enquanto um `CreateDialog` ou
+    /// `PasswordDialog` está aberto. Todo caminho que dispara um desses
+    /// diálogos deve checar essa flag antes de abrir outro, e todo caminho
+    /// que fecha um diálogo (confirmar-sucesso, confirmar-erro-que-esconde,
+    /// cancelar) deve resetá-la — um `true` vazado trava a UI para sempre.
+    pub dialogo_aberto: bool,
 }
 
 pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<ModelRc<StandardListViewItem>> {
@@ -55,6 +61,7 @@ impl App {
             rows: Vec::new(),
             ultimo_clique: None,
             senha_do_archive: None,
+            dialogo_aberto: false,
         }));
         let app = App { window, state };
         app.recarregar();
@@ -255,10 +262,21 @@ impl App {
         let q = Arc::clone(&queue);
         let descricoes3 = Arc::clone(&descricoes);
         let state3 = Rc::clone(&self.state);
+        let weak4 = self.window.as_weak();
         self.window.on_adicionar(move || {
-            // 1. Escolher entradas (arquivos/pastas a compactar).
+            // Guarda contra diálogos empilhados: se um CreateDialog/PasswordDialog
+            // já está aberto (janela principal continua interativa), ignora o
+            // disparo em vez de abrir outro por cima.
+            if state3.borrow().dialogo_aberto {
+                if let Some(w) = weak4.upgrade() {
+                    w.set_status("Feche o diálogo aberto primeiro.".into());
+                }
+                return;
+            }
+
+            // 1. Escolher entradas (arquivos a compactar).
             let Some(inputs) = rfd::FileDialog::new()
-                .set_title("Arquivos/pastas para compactar")
+                .set_title("Arquivos para compactar")
                 .pick_files()
             else {
                 return;
@@ -266,6 +284,7 @@ impl App {
 
             // 2. Abrir o diálogo de opções de criação.
             let dlg = CreateDialog::new().expect("dialog");
+            state3.borrow_mut().dialogo_aberto = true;
             let dlg_weak = dlg.as_weak();
             let q = Arc::clone(&q);
             let descricoes = Arc::clone(&descricoes3);
@@ -278,13 +297,16 @@ impl App {
 
             dlg.on_cancelar({
                 let w = dlg_weak.clone();
+                let state3 = Rc::clone(&state3);
                 move || {
+                    state3.borrow_mut().dialogo_aberto = false;
                     if let Some(d) = w.upgrade() {
                         let _ = d.hide();
                     }
                 }
             });
 
+            let state_confirmar = Rc::clone(&state3);
             dlg.on_confirmar(move |formato, nivel, senha, criptografar_nomes| {
                 use evezip_engine::{CreateOptions, Format};
                 let (fmt, ext) = match formato.as_str() {
@@ -300,6 +322,8 @@ impl App {
                     .set_file_name(&sugestao)
                     .save_file()
                 else {
+                    // Diálogo de destino cancelado: o CreateDialog continua
+                    // aberto, então a flag permanece true.
                     return;
                 };
                 // O 7zz (via evezip-engine::ops::create) rejeita senha em
@@ -309,7 +333,7 @@ impl App {
                 // reter texto de uma seleção anterior de formato).
                 let eh_tar = matches!(fmt, Format::Tar | Format::TarGz);
                 let password = if eh_tar { None } else { (!senha.is_empty()).then(|| senha.to_string()) };
-                let encrypt_names = !eh_tar && criptografar_nomes && fmt == Format::SevenZ;
+                let encrypt_names = criptografar_nomes && fmt == Format::SevenZ;
                 submeter(
                     &q,
                     &descricoes,
@@ -325,6 +349,7 @@ impl App {
                         },
                     },
                 );
+                state_confirmar.borrow_mut().dialogo_aberto = false;
                 if let Some(d) = dlg_weak.upgrade() {
                     let _ = d.hide();
                 }
@@ -365,12 +390,23 @@ fn pedir_senha_e_navegar(
     nova: Location,
     mensagem: &str,
 ) {
+    // Guarda contra diálogos empilhados: se um diálogo já está aberto (ex.:
+    // outra navegação com senha em curso), ignora este disparo.
+    if state.borrow().dialogo_aberto {
+        if let Some(w) = weak.upgrade() {
+            w.set_status("Feche o diálogo aberto primeiro.".into());
+        }
+        return;
+    }
     let dlg = PasswordDialog::new().expect("dialog");
     dlg.set_mensagem(mensagem.into());
+    state.borrow_mut().dialogo_aberto = true;
     let dlg_weak = dlg.as_weak();
     dlg.on_cancelar({
         let w = dlg_weak.clone();
+        let state = Rc::clone(state);
         move || {
+            state.borrow_mut().dialogo_aberto = false;
             if let Some(d) = w.upgrade() {
                 let _ = d.hide();
             }
@@ -389,6 +425,7 @@ fn pedir_senha_e_navegar(
                     let mut s = state.borrow_mut();
                     s.senha_do_archive = Some(senha.to_string());
                     s.location = nova.clone();
+                    s.dialogo_aberto = false;
                 }
                 if let Some(w) = weak.upgrade() {
                     recarregar_janela(&w, &state);
@@ -398,11 +435,15 @@ fn pedir_senha_e_navegar(
                 }
             }
             Err(evezip_engine::EngineError::SenhaIncorreta) => {
+                // Diálogo permanece aberto para nova tentativa: flag continua
+                // true. Limpa o campo de senha para não reexibir a senha errada.
                 if let Some(d) = dlg_weak.upgrade() {
                     d.set_mensagem("Senha incorreta, tente novamente.".into());
+                    d.set_senha_texto("".into());
                 }
             }
             Err(e) => {
+                state.borrow_mut().dialogo_aberto = false;
                 if let Some(w) = weak.upgrade() {
                     w.set_status(format!("Erro: {e}").into());
                 }
