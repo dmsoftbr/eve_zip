@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, StandardListViewItem, VecModel, Weak};
@@ -169,10 +169,11 @@ impl App {
     /// depois de `App::new`, uma vez que a fila (e a ponte de eventos) exista.
     /// Substitui os `on_extrair`/`on_testar` vazios instalados em
     /// `instalar_callbacks`.
-    pub fn instalar_fila(&self, queue: Arc<JobQueue>) {
+    pub fn instalar_fila(&self, queue: Arc<JobQueue>, descricoes: Arc<Mutex<HashMap<JobId, String>>>) {
         let state = Rc::clone(&self.state);
         let weak = self.window.as_weak();
         let q = Arc::clone(&queue);
+        let descricoes1 = Arc::clone(&descricoes);
 
         self.window.on_extrair(move || {
             let (archive, senha, entrada) = {
@@ -217,6 +218,7 @@ impl App {
             };
             submeter(
                 &q,
+                &descricoes1,
                 JobSpec {
                     descricao: format!(
                         "Extrair {}",
@@ -229,11 +231,13 @@ impl App {
 
         let q = Arc::clone(&queue);
         let state2 = Rc::clone(&self.state);
+        let descricoes2 = Arc::clone(&descricoes);
         self.window.on_testar(move || {
             let s = state2.borrow();
             if let Location::Archive { archive, .. } = &s.location {
                 submeter(
                     &q,
+                    &descricoes2,
                     JobSpec {
                         descricao: format!("Testar {}", archive.display()),
                         kind: JobKind::Test { archive: archive.clone(), password: s.senha_do_archive.clone() },
@@ -279,27 +283,28 @@ pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
     }
 }
 
-/// Mapa global id → descrição, usado para preencher `JobRow.descricao` quando
-/// o evento `Started` chega (ele só carrega o id). Preenchido em `submeter`
-/// antes do job aparecer no painel; limpo nos eventos terminais.
-fn descricoes() -> &'static Mutex<HashMap<JobId, String>> {
-    static M: OnceLock<Mutex<HashMap<JobId, String>>> = OnceLock::new();
-    M.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Único ponto de submissão de jobs na UI: registra a descrição e submete.
-/// Todo `q.submit(spec)` de um callback da UI deve passar por aqui.
-pub fn submeter(q: &JobQueue, spec: JobSpec) -> JobId {
+/// Único ponto de submissão de jobs na UI: registra a descrição em `descricoes`
+/// e submete o job na fila. Todo `q.submit(spec)` de um callback da UI deve
+/// passar por aqui.
+///
+/// Invariante estrutural: esta função só é chamada a partir do thread da UI
+/// (dentro de um callback Slint, ex.: `on_extrair`/`on_testar`). Isso garante
+/// que a inserção no mapa aconteça antes de o event loop processar o evento
+/// `Started` correspondente — que também só é tratado no thread da UI, via
+/// `Weak::upgrade_in_event_loop` (ver `aplicar_evento`/`main.rs`). Sem essa
+/// garantia (ex.: se `submeter` fosse chamada de outra thread), haveria uma
+/// corrida entre o insert e o `Started` chegando primeiro.
+pub fn submeter(q: &JobQueue, descricoes: &Mutex<HashMap<JobId, String>>, spec: JobSpec) -> JobId {
     let descricao = spec.descricao.clone();
     let id = q.submit(spec);
-    descricoes().lock().unwrap().insert(id, descricao);
+    descricoes.lock().unwrap().insert(id, descricao);
     id
 }
 
 /// Aplica um `JobEvent` ao modelo `jobs` da janela. Roda no thread da UI
 /// (agendado via `Weak::upgrade_in_event_loop` a partir da thread-ponte em
 /// `main.rs`).
-pub fn aplicar_evento(w: &AppWindow, ev: JobEvent) {
+pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>, ev: JobEvent) {
     type Mudanca = Box<dyn Fn(&mut JobRow)>;
 
     let modelo = w.get_jobs();
@@ -307,7 +312,7 @@ pub fn aplicar_evento(w: &AppWindow, ev: JobEvent) {
 
     let (id, mudanca): (JobId, Mudanca) = match ev {
         JobEvent::Started(id) => {
-            let descricao = descricoes().lock().unwrap().get(&id).cloned().unwrap_or_default();
+            let descricao = descricoes.lock().unwrap().get(&id).cloned().unwrap_or_default();
             jobs.push(JobRow {
                 id: id as i32,
                 descricao: descricao.into(),
@@ -318,7 +323,7 @@ pub fn aplicar_evento(w: &AppWindow, ev: JobEvent) {
         }
         JobEvent::Progress(id, p) => (id, Box::new(move |j: &mut JobRow| j.progresso = p as i32)),
         JobEvent::Done(id) => {
-            descricoes().lock().unwrap().remove(&id);
+            descricoes.lock().unwrap().remove(&id);
             (
                 id,
                 Box::new(|j: &mut JobRow| {
@@ -328,12 +333,12 @@ pub fn aplicar_evento(w: &AppWindow, ev: JobEvent) {
             )
         }
         JobEvent::Failed(id, e) => {
-            descricoes().lock().unwrap().remove(&id);
+            descricoes.lock().unwrap().remove(&id);
             let msg = slint::SharedString::from(format!("erro: {e}"));
             (id, Box::new(move |j: &mut JobRow| j.estado = msg.clone()))
         }
         JobEvent::Cancelled(id) => {
-            descricoes().lock().unwrap().remove(&id);
+            descricoes.lock().unwrap().remove(&id);
             (id, Box::new(|j: &mut JobRow| j.estado = "cancelado".into()))
         }
     };
@@ -381,28 +386,28 @@ mod jobs_tests {
     }
 
     #[test]
-    fn submeter_registra_descricao_antes_do_started_chegar() {
+    fn submeter_registra_descricao_no_mapa() {
         let (tx, rx) = mpsc::channel();
         let q = JobQueue::new(Arc::new(EngineFalso), tx);
+        let descricoes: Mutex<HashMap<JobId, String>> = Mutex::new(HashMap::new());
         let id = submeter(
             &q,
+            &descricoes,
             JobSpec {
                 descricao: "Testar a.7z".into(),
                 kind: JobKind::Test { archive: PathBuf::from("/x/a.7z"), password: None },
             },
         );
 
-        // O evento Started chega (potencialmente já emitido pela worker thread
-        // antes de `submeter` retornar) — o mapa deve conter a descrição
-        // independentemente da corrida, pois `aplicar_evento` só é chamado a
-        // partir do event loop da UI, sempre depois de `submeter` retornar.
+        // `submeter` insere no mapa antes de retornar — não depende de nenhum
+        // evento chegar para isso ser verdade.
+        assert_eq!(descricoes.lock().unwrap().get(&id).cloned(), Some("Testar a.7z".to_string()));
+
+        // Consome os eventos (Started + terminal) para não vazar a thread do
+        // worker (join implícito via drop do sender ao sair de escopo já é
+        // suficiente para o teste, mas drenar deixa a intenção clara).
         let started = rx.recv().unwrap();
         assert!(matches!(started, JobEvent::Started(i) if i == id));
-        assert_eq!(descricoes().lock().unwrap().get(&id).cloned(), Some("Testar a.7z".to_string()));
-
-        // Consome o evento terminal para não vazar a thread do worker (join
-        // implícito via drop do sender ao sair de escopo já é suficiente para
-        // o teste, mas drenar deixa a intenção clara).
         let _ = rx.recv();
     }
 }
