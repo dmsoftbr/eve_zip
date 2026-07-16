@@ -106,6 +106,10 @@ impl Engine {
             archive.into(),
         ];
         if let Some(sel) = entries {
+            // "--" marca fim das opções: sem isso, uma entrada cujo caminho
+            // comece com "-" (ex.: "-y") é interpretada como switch repetido
+            // e o 7zz falha com "Multiple instances for switch".
+            args.push("--".into());
             args.extend(sel.iter().map(OsString::from));
         }
         run_7zz(&self.bin, &args, on_progress, cancel)
@@ -121,6 +125,19 @@ impl Engine {
         on_progress: &mut dyn FnMut(u8),
         cancel: &CancelToken,
     ) -> Result<(), EngineError> {
+        // tar/tar.gz não têm criptografia nativa: o 7zz aceitaria o -p
+        // silenciosamente sem proteger nada, o que enganaria o usuário.
+        if matches!(options.format, Format::Tar | Format::TarGz) && options.password.is_some() {
+            return Err(EngineError::OpcaoNaoSuportada(
+                "senha não é suportada em tar/tar.gz".into(),
+            ));
+        }
+        // 7zz `a` acrescenta a um archive existente em vez de substituí-lo,
+        // o que pode misturar entradas criptografadas e não criptografadas
+        // (ou nomes cifrados com não cifrados) num mesmo arquivo.
+        if archive.exists() {
+            std::fs::remove_file(archive)?;
+        }
         match options.format {
             Format::TarGz => self.create_targz(archive, inputs, on_progress, cancel),
             _ => self.create_simple(archive, inputs, options, on_progress, cancel),
@@ -151,6 +168,14 @@ impl Engine {
         if options.format != Format::Tar {
             args.push(format!("-mx{}", options.level).into());
         }
+        // NB: diferente de list/extract/test, o comando `a` (criação) do 7zz
+        // trata um "-p" vazio como pedido de senha interativa para um
+        // archive cifrável (zip/7z) — sem stdin, o processo trava e sai com
+        // "Break signaled". Verificado contra o binário real. Por isso,
+        // ao contrário de `arg_senha` nos outros comandos, aqui "-p" só
+        // entra quando há senha de fato (tar/tar.gz nunca chegam com senha:
+        // `create` já barra isso antes, e tar/gzip ignoram "-p" sem quebrar,
+        // mas mesmo assim não há necessidade de adicioná-lo).
         if let Some(pw) = &options.password {
             args.push(arg_senha(Some(pw)));
             match options.format {
@@ -160,6 +185,9 @@ impl Engine {
             }
         }
         args.push(archive.into());
+        // "--" marca fim das opções: um input cujo nome comece com "-"
+        // não deve ser interpretado como switch.
+        args.push("--".into());
         args.extend(inputs.iter().map(OsString::from));
         run_7zz(&self.bin, &args, on_progress, cancel).map(|_| ())
     }
@@ -173,29 +201,35 @@ impl Engine {
         cancel: &CancelToken,
     ) -> Result<(), EngineError> {
         let tmp_tar = archive.with_extension("tar.evezip-tmp");
-        let passo1 = CreateOptions {
-            format: Format::Tar,
-            level: 0,
-            password: None,
-            encrypt_names: false,
-        };
-        // 0–50%: tar; 50–100%: gzip.
-        let mut p1 = |p: u8| on_progress(p / 2);
-        self.create_simple(&tmp_tar, inputs, &passo1, &mut p1, cancel)?;
+        // Os dois passos rodam dentro do closure para que o `.tar` temporário
+        // seja sempre removido depois — sucesso, falha no passo 1 ou falha
+        // no passo 2 — sem deixar lixo do lado do arquivo do usuário.
+        let resultado = (|| -> Result<(), EngineError> {
+            let passo1 = CreateOptions {
+                format: Format::Tar,
+                level: 0,
+                password: None,
+                encrypt_names: false,
+            };
+            // 0–50%: tar; 50–100%: gzip.
+            let mut p1 = |p: u8| on_progress(p / 2);
+            self.create_simple(&tmp_tar, inputs, &passo1, &mut p1, cancel)?;
 
-        let mut args: Vec<OsString> = vec![
-            "a".into(),
-            "-tgzip".into(),
-            "-y".into(),
-            "-bsp1".into(),
-            "-bso0".into(),
-            archive.into(),
-            (&tmp_tar).into(),
-        ];
-        let mut p2 = |p: u8| on_progress(50 + p / 2);
-        let r = run_7zz(&self.bin, &args, &mut p2, cancel).map(|_| ());
+            let args: Vec<OsString> = vec![
+                "a".into(),
+                "-tgzip".into(),
+                "-y".into(),
+                "-bsp1".into(),
+                "-bso0".into(),
+                arg_senha(None),
+                archive.into(),
+                (&tmp_tar).into(),
+            ];
+            let mut p2 = |p: u8| on_progress(50 + p / 2);
+            run_7zz(&self.bin, &args, &mut p2, cancel).map(|_| ())
+        })();
         let _ = std::fs::remove_file(&tmp_tar);
-        r
+        resultado
     }
 
     /// Extrai o .tar interno de um .tar.gz para um temp e aplica `f` sobre ele.

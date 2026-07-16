@@ -90,6 +90,118 @@ fn extracao_seletiva() {
 }
 
 #[test]
+fn extracao_seletiva_entry_com_nome_de_switch() {
+    // Entrada cujo caminho no archive é literalmente "-y": sem "--" antes da
+    // seleção, o 7zz interpreta isso como o switch "-y" repetido e falha com
+    // "Multiple instances for switch".
+    let d = sandbox("nome-switch");
+    let arquivo_dash = d.join("in/-y");
+    std::fs::write(&arquivo_dash, "conteudo switch").unwrap();
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.zip");
+    let opts = CreateOptions { format: Format::Zip, level: 5, password: None, encrypt_names: false };
+    eng.create(&arq, &[arquivo_dash], &opts, &mut |_| {}, &CancelToken::new()).unwrap();
+
+    let entradas = eng.list(&arq, None).unwrap();
+    let caminhos: Vec<_> = entradas.iter().map(|e| e.path.replace('\\', "/")).collect();
+    assert!(caminhos.iter().any(|p| p == "-y"), "{caminhos:?}");
+
+    let dest = d.join("so-dash");
+    eng.extract(&arq, &dest, Some(&["-y".into()]), None, &mut |_| {}, &CancelToken::new())
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(dest.join("-y")).unwrap(), "conteudo switch");
+}
+
+#[test]
+fn create_substitui_archive_existente_em_vez_de_acrescentar() {
+    let d = sandbox("substitui");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.7z");
+
+    // Primeiro: 7z criptografado (senha + nomes criptografados).
+    let opts_enc = CreateOptions {
+        format: Format::SevenZ,
+        level: 5,
+        password: Some("s3nha!".into()),
+        encrypt_names: true,
+    };
+    eng.create(&arq, &[d.join("in/a.txt")], &opts_enc, &mut |_| {}, &CancelToken::new())
+        .unwrap();
+
+    // Segundo: cria de novo no MESMO caminho, sem senha, com outro arquivo.
+    std::fs::write(d.join("in/c.txt"), "conteúdo C").unwrap();
+    let opts_plain = CreateOptions {
+        format: Format::SevenZ,
+        level: 5,
+        password: None,
+        encrypt_names: false,
+    };
+    eng.create(&arq, &[d.join("in/c.txt")], &opts_plain, &mut |_| {}, &CancelToken::new())
+        .unwrap();
+
+    let entradas = eng.list(&arq, None).unwrap();
+    assert_eq!(entradas.len(), 1, "esperava só a entrada nova: {entradas:?}");
+    assert!(entradas[0].path.ends_with("c.txt"), "{entradas:?}");
+    assert!(!entradas[0].encrypted, "entrada não deveria estar criptografada: {entradas:?}");
+}
+
+#[test]
+fn senha_em_tar_gz_vira_erro() {
+    let d = sandbox("tar-gz-senha");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.tar.gz");
+    let opts = CreateOptions {
+        format: Format::TarGz,
+        level: 5,
+        password: Some("s3nha!".into()),
+        encrypt_names: false,
+    };
+    let err = eng
+        .create(&arq, &[d.join("in")], &opts, &mut |_| {}, &CancelToken::new())
+        .unwrap_err();
+    assert!(matches!(err, EngineError::OpcaoNaoSuportada(_)), "{err:?}");
+    assert!(!arq.exists());
+}
+
+#[test]
+fn senha_em_tar_vira_erro() {
+    let d = sandbox("tar-senha");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.tar");
+    let opts = CreateOptions {
+        format: Format::Tar,
+        level: 5,
+        password: Some("s3nha!".into()),
+        encrypt_names: false,
+    };
+    let err = eng
+        .create(&arq, &[d.join("in")], &opts, &mut |_| {}, &CancelToken::new())
+        .unwrap_err();
+    assert!(matches!(err, EngineError::OpcaoNaoSuportada(_)), "{err:?}");
+    assert!(!arq.exists());
+}
+
+#[test]
+fn create_targz_nao_deixa_tar_temporario_quando_passo1_falha() {
+    let d = sandbox("targz-tmp-falha");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.tar.gz");
+    let inexistente = d.join("nao-existe.txt");
+    let opts = CreateOptions { format: Format::TarGz, level: 5, password: None, encrypt_names: false };
+
+    let err = eng
+        .create(&arq, &[inexistente], &opts, &mut |_| {}, &CancelToken::new())
+        .unwrap_err();
+    assert!(
+        matches!(err, EngineError::Falha { .. } | EngineError::ArchiveCorrompido(_)),
+        "{err:?}"
+    );
+
+    let tmp = arq.with_extension("tar.evezip-tmp");
+    assert!(!tmp.exists(), "tar temporário não deveria sobrar: {tmp:?}");
+}
+
+#[test]
 fn extrai_rar_se_houver_fixture() {
     // Não é possível GERAR rar (proprietário). Fixture opcional em tests/fixtures/sample.rar
     // contendo um arquivo "hello.txt" com o texto "hello rar".
