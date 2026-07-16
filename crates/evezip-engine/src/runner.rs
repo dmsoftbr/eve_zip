@@ -53,43 +53,80 @@ pub fn run_7zz(
     });
 
     // Lê stdout em blocos; tokens separados por '\r'/'\n' podem conter progresso.
-    let mut saida = String::new();
-    let mut parcial = String::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = stdout.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        let texto = String::from_utf8_lossy(&buf[..n]);
-        saida.push_str(&texto);
-        for ch in texto.chars() {
-            if ch == '\r' || ch == '\n' {
-                if let Some(p) = parse_progress(&parcial) {
-                    on_progress(p);
+    // Acumula bytes crus e só decodifica UTF-8 por token completo (ou no fim, para
+    // a saída inteira) — assim um caractere multibyte (ex.: nome de arquivo
+    // acentuado) partido entre dois chunks de 4096 bytes nunca vira U+FFFD.
+    //
+    // Todo o corpo do loop fica dentro de uma closure que retorna Result: se o
+    // `read` falhar no meio da leitura, o `?` sai da closure (não da função), o
+    // que garante que a limpeza abaixo (kill em caso de erro, wait, marcar
+    // `terminou`, join das threads) sempre rode antes de qualquer erro ser
+    // propagado para o chamador.
+    let leitura: std::io::Result<Vec<u8>> = (|| {
+        let mut saida = Vec::new();
+        let mut parcial: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = stdout.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            saida.extend_from_slice(&buf[..n]);
+            for &b in &buf[..n] {
+                if b == b'\r' || b == b'\n' {
+                    if !parcial.is_empty() {
+                        let token = String::from_utf8_lossy(&parcial);
+                        if let Some(p) = parse_progress(&token) {
+                            on_progress(p);
+                        }
+                        parcial.clear();
+                    }
+                } else {
+                    parcial.push(b);
                 }
-                parcial.clear();
-            } else {
-                parcial.push(ch);
             }
         }
-    }
-    if let Some(p) = parse_progress(&parcial) {
-        on_progress(p);
+        if !parcial.is_empty() {
+            let token = String::from_utf8_lossy(&parcial);
+            if let Some(p) = parse_progress(&token) {
+                on_progress(p);
+            }
+        }
+        Ok(saida)
+    })();
+
+    // Se a leitura do stdout falhou, o processo pode ainda estar rodando; tenta
+    // matá-lo antes de seguir para a limpeza (ignora erro: pode já ter morrido).
+    if leitura.is_err() {
+        let _ = child.lock().unwrap().kill();
     }
 
-    let status = child.lock().unwrap().wait()?;
+    // Invariante: ao sair do loop acima por EOF (n == 0), o 7zz já fechou o pipe
+    // de stdout, o que só acontece quando o processo está encerrando. Por isso
+    // este wait() tende a retornar quase instantaneamente e não fica preso
+    // segurando o lock do child — o que deixaria o watcher sem conseguir
+    // adquirir o lock para matar o processo em caso de cancelamento.
+    let status_resultado = child.lock().unwrap().wait();
+
     terminou.store(true, Ordering::SeqCst);
     let _ = watcher.join();
     let stderr_texto = stderr_handle.join().unwrap_or_default();
+
+    // Só agora, com child aguardado/finalizado, watcher e stderr_handle
+    // encerrados, propagamos qualquer erro pendente da leitura ou do wait.
+    let saida_bytes = leitura?;
+    let status = status_resultado?;
 
     if cancel.is_cancelled() {
         return Err(EngineError::Cancelado);
     }
     match status.code() {
-        Some(0) => Ok(saida),
+        Some(0) => Ok(String::from_utf8_lossy(&saida_bytes).into_owned()),
         Some(code) => Err(mapear_erro(code, &stderr_texto)),
-        None => Err(EngineError::Cancelado), // morto por sinal
+        // Morte por sinal (crash/OOM-kill) que não veio do nosso watcher (já
+        // tratado acima via cancel.is_cancelled()) deve virar um erro mapeado,
+        // não Cancelado.
+        None => Err(mapear_erro(-1, &stderr_texto)),
     }
 }
 
@@ -174,5 +211,32 @@ mod tests {
             mapear_erro(1, "algum aviso"),
             EngineError::Falha { exit_code: 1, .. }
         ));
+    }
+
+    #[test]
+    fn cancelamento_encerra_processo_de_execucao_longa() {
+        let bin = find_7zz().unwrap();
+        let cancel = CancelToken::new();
+        let cancel_watcher = cancel.clone();
+
+        let inicio = std::time::Instant::now();
+        let handle = std::thread::spawn(move || {
+            run_7zz(&bin, &args(&["b", "-mmt1"]), &mut |_| {}, &cancel_watcher)
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        cancel.cancel();
+
+        let resultado = handle.join().expect("thread do run_7zz não deve entrar em pânico");
+        let decorrido = inicio.elapsed();
+
+        assert!(
+            matches!(resultado, Err(EngineError::Cancelado)),
+            "esperava Err(Cancelado), obteve {resultado:?}"
+        );
+        assert!(
+            decorrido < std::time::Duration::from_secs(15),
+            "cancelamento deveria ser rápido (child.kill()), mas levou {decorrido:?}"
+        );
     }
 }
