@@ -10,6 +10,9 @@ pub enum Cli {
     /// Abre o app com o diálogo de criação preenchido com estes arquivos
     /// (usado pela Quick Action "Comprimir com EveZip" do Finder).
     Comprimir(Vec<PathBuf>),
+    /// Extrai cada archive numa subpasta numerada ao lado dele, sem UI
+    /// (usado pela Quick Action "Extrair com EveZip" do Finder).
+    ExtrairAqui(Vec<PathBuf>),
 }
 
 /// Destino padrão de `evezip x <archive>` quando `-o` não é informado.
@@ -44,11 +47,15 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
         [cmd, resto @ ..] if cmd == "a" && !resto.is_empty() => {
             Ok(Cli::Comprimir(resto.iter().map(PathBuf::from).collect()))
         }
+        [cmd, resto @ ..] if cmd == "e" && !resto.is_empty() => {
+            Ok(Cli::ExtrairAqui(resto.iter().map(PathBuf::from).collect()))
+        }
         [caminho] => Ok(Cli::Abrir(Some(caminho.into()))),
-        _ => Err(
-            "uso: evezip [<archive>] | evezip x <archive> [-o <destino>] | evezip a <arquivos...>"
-                .into(),
-        ),
+        _ => Err(concat!(
+            "uso: evezip [<archive>] | evezip x <archive> [-o <destino>] | ",
+            "evezip a <arquivos...> | evezip e <archives...>"
+        )
+        .into()),
     }
 }
 
@@ -113,6 +120,16 @@ mod tests {
     fn a_sem_arquivos_nao_e_comprimir() {
         // "a" sozinho não é comando de compressão — cai em Abrir(Some("a")).
         assert_eq!(parse(&v(&["a"])).unwrap(), Cli::Abrir(Some("a".into())));
+    }
+
+    #[test]
+    fn e_extrai_aqui() {
+        assert_eq!(
+            parse(&v(&["e", "/x/a.zip", "/x/b.7z"])).unwrap(),
+            Cli::ExtrairAqui(vec!["/x/a.zip".into(), "/x/b.7z".into()])
+        );
+        // "e" sozinho não é comando — cai em Abrir(Some("e")).
+        assert_eq!(parse(&v(&["e"])).unwrap(), Cli::Abrir(Some("e".into())));
     }
 
     #[test]

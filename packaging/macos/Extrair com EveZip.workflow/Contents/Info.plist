@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict><key>default</key><string>Extrair com EveZip</string></dict>
+            <key>NSMessage</key><string>runWorkflowAsService</string>
+            <key>NSRequiredContext</key>
+            <dict><key>NSApplicationIdentifier</key><string>com.apple.finder</string></dict>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.zip-archive</string>
+                <string>public.archive</string>
+                <string>org.7-zip.7-zip-archive</string>
+                <string>com.rarlab.rar-archive</string>
+                <string>public.tar-archive</string>
+                <string>org.gnu.gnu-zip-archive</string>
+                <string>org.gnu.gnu-zip-tar-archive</string>
+                <string>public.item</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

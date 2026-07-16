@@ -33,6 +33,7 @@ fn main() {
 
     match comando {
         cli::Cli::Extrair { archive, dest } => extrair_headless(&engine, archive, dest),
+        cli::Cli::ExtrairAqui(archives) => extrair_aqui(&engine, archives),
         cli::Cli::Abrir(caminho) => abrir_ui(engine, caminho, Vec::new()),
         cli::Cli::Comprimir(inputs) => {
             // Abre no diretório do primeiro item; o diálogo de criação abre
@@ -71,6 +72,39 @@ fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Opt
             eprintln!("erro: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// Extração sem UI de vários archives, cada um numa subpasta numerada ao lado
+/// dele (nunca sobrescreve). Usado pela Quick Action "Extrair com EveZip".
+/// Sai com código ≠ 0 se algum archive falhar (ex.: protegido por senha).
+fn extrair_aqui(engine: &Arc<dyn ArchiveEngine>, archives: Vec<PathBuf>) {
+    let mut erros = 0;
+    for archive in &archives {
+        let pasta = archive
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let dest = app::destino_extracao(&pasta, archive);
+        let r = engine.extract(
+            archive,
+            &dest,
+            None,
+            None,
+            &mut |_| {},
+            &evezip_engine::CancelToken::new(),
+        );
+        match r {
+            Ok(()) => println!("extraído: {} -> {}", archive.display(), dest.display()),
+            Err(e) => {
+                eprintln!("erro em {}: {e}", archive.display());
+                erros += 1;
+            }
+        }
+    }
+    if erros > 0 {
+        std::process::exit(1);
     }
 }
 

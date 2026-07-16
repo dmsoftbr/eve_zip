@@ -497,7 +497,7 @@ fn nome_de(p: &std::path::Path) -> String {
 
 /// Nome-base de um archive para a pasta de extração: remove as extensões de
 /// archive conhecidas ("backup.tar.gz" → "backup", "x.7z" → "x").
-fn base_archive(archive: &std::path::Path) -> String {
+pub fn base_archive(archive: &std::path::Path) -> String {
     let nome = nome_de(archive);
     if nome.is_empty() {
         return "extraido".into();
@@ -516,7 +516,10 @@ fn base_archive(archive: &std::path::Path) -> String {
 /// Pasta de destino para extrair o archive INTEIRO: subpasta com o nome do
 /// archive dentro de `escolhido`, numerada ("nome", "nome 2", "nome 3", ...)
 /// para nunca sobrescrever — como o Utilitário de Arquivos do macOS.
-fn destino_extracao(escolhido: &std::path::Path, archive: &std::path::Path) -> std::path::PathBuf {
+pub fn destino_extracao(
+    escolhido: &std::path::Path,
+    archive: &std::path::Path,
+) -> std::path::PathBuf {
     let base = base_archive(archive);
     let candidato = escolhido.join(&base);
     if !candidato.exists() {

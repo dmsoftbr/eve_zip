@@ -100,3 +100,8 @@ Isso copia a Quick Action para `~/Library/Services/` e atualiza o cache de
 Serviços. Clique com o botão direito em um ou mais arquivos/pastas no Finder →
 **Comprimir com EveZip** (aparece em "Ações Rápidas" ou no submenu "Serviços").
 O EveZip abre com o diálogo de criação já preenchido com a seleção.
+
+A ação **Extrair com EveZip** aparece ao clicar com o botão direito num archive:
+extrai na mesma pasta, numa subpasta com o nome do archive (numerada se já
+existir), sem abrir janela. Archives com senha não são suportados por essa ação
+(use a janela do app para informar a senha).
