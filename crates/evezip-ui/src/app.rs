@@ -127,6 +127,12 @@ impl App {
                                 recarregar_janela(&w, &state);
                             }
                         }
+                        Err(evezip_engine::EngineError::SenhaNecessaria) => {
+                            pedir_senha_e_navegar(&state, &weak, nova, "Este archive exige senha.");
+                        }
+                        Err(evezip_engine::EngineError::SenhaIncorreta) => {
+                            pedir_senha_e_navegar(&state, &weak, nova, "Senha incorreta, tente novamente.");
+                        }
                         Err(e) => {
                             // Navegação falhou (ex.: archive corrompido): NÃO navega
                             // e NÃO recarrega — a tabela continua mostrando o
@@ -247,6 +253,86 @@ impl App {
         });
 
         let q = Arc::clone(&queue);
+        let descricoes3 = Arc::clone(&descricoes);
+        let state3 = Rc::clone(&self.state);
+        self.window.on_adicionar(move || {
+            // 1. Escolher entradas (arquivos/pastas a compactar).
+            let Some(inputs) = rfd::FileDialog::new()
+                .set_title("Arquivos/pastas para compactar")
+                .pick_files()
+            else {
+                return;
+            };
+
+            // 2. Abrir o diálogo de opções de criação.
+            let dlg = CreateDialog::new().expect("dialog");
+            let dlg_weak = dlg.as_weak();
+            let q = Arc::clone(&q);
+            let descricoes = Arc::clone(&descricoes3);
+            let dir_atual = match &state3.borrow().location {
+                Location::Disk(d) => d.clone(),
+                Location::Archive { archive, .. } => {
+                    archive.parent().unwrap_or(std::path::Path::new("/")).to_path_buf()
+                }
+            };
+
+            dlg.on_cancelar({
+                let w = dlg_weak.clone();
+                move || {
+                    if let Some(d) = w.upgrade() {
+                        let _ = d.hide();
+                    }
+                }
+            });
+
+            dlg.on_confirmar(move |formato, nivel, senha, criptografar_nomes| {
+                use evezip_engine::{CreateOptions, Format};
+                let (fmt, ext) = match formato.as_str() {
+                    "zip" => (Format::Zip, "zip"),
+                    "tar" => (Format::Tar, "tar"),
+                    "tar.gz" => (Format::TarGz, "tar.gz"),
+                    _ => (Format::SevenZ, "7z"),
+                };
+                let sugestao = format!("novo.{ext}");
+                let Some(destino) = rfd::FileDialog::new()
+                    .set_title("Salvar archive como...")
+                    .set_directory(&dir_atual)
+                    .set_file_name(&sugestao)
+                    .save_file()
+                else {
+                    return;
+                };
+                // O 7zz (via evezip-engine::ops::create) rejeita senha em
+                // tar/tar.gz com `OpcaoNaoSuportada` — o diálogo já desabilita
+                // os campos de senha/nomes para esses formatos, mas isso é
+                // reforçado aqui em defesa de profundidade (o campo poderia
+                // reter texto de uma seleção anterior de formato).
+                let eh_tar = matches!(fmt, Format::Tar | Format::TarGz);
+                let password = if eh_tar { None } else { (!senha.is_empty()).then(|| senha.to_string()) };
+                let encrypt_names = !eh_tar && criptografar_nomes && fmt == Format::SevenZ;
+                submeter(
+                    &q,
+                    &descricoes,
+                    JobSpec {
+                        descricao: format!(
+                            "Criar {}",
+                            destino.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                        ),
+                        kind: JobKind::Create {
+                            archive: destino,
+                            inputs: inputs.clone(),
+                            options: CreateOptions { format: fmt, level: nivel as u8, password, encrypt_names },
+                        },
+                    },
+                );
+                if let Some(d) = dlg_weak.upgrade() {
+                    let _ = d.hide();
+                }
+            });
+            let _ = dlg.show();
+        });
+
+        let q = Arc::clone(&queue);
         self.window.on_cancelar_job(move |id| q.cancel(id as JobId));
     }
 
@@ -265,6 +351,68 @@ fn mesmo_archive(a: &Location, b: &Location) -> bool {
         (Location::Archive { archive: a1, .. }, Location::Archive { archive: a2, .. })
             if a1 == a2
     )
+}
+
+/// Abre o `PasswordDialog` para uma navegação que falhou com `SenhaNecessaria`
+/// ou `SenhaIncorreta`, e tenta `list` de novo com a senha digitada. Sucesso:
+/// grava a senha em `state.senha_do_archive`, navega para `nova` e recarrega a
+/// janela. `SenhaIncorreta` de novo: reexibe o diálogo com nova mensagem
+/// (permite repetir quantas vezes o usuário quiser). Qualquer outro erro:
+/// mostra na status bar e fecha o diálogo.
+fn pedir_senha_e_navegar(
+    state: &Rc<std::cell::RefCell<State>>,
+    weak: &slint::Weak<AppWindow>,
+    nova: Location,
+    mensagem: &str,
+) {
+    let dlg = PasswordDialog::new().expect("dialog");
+    dlg.set_mensagem(mensagem.into());
+    let dlg_weak = dlg.as_weak();
+    dlg.on_cancelar({
+        let w = dlg_weak.clone();
+        move || {
+            if let Some(d) = w.upgrade() {
+                let _ = d.hide();
+            }
+        }
+    });
+    let state = Rc::clone(state);
+    let weak = weak.clone();
+    dlg.on_confirmar(move |senha| {
+        let resultado = {
+            let mut s = state.borrow_mut();
+            s.browser.list(&nova, Some(senha.as_str())).map(|_| ())
+        };
+        match resultado {
+            Ok(()) => {
+                {
+                    let mut s = state.borrow_mut();
+                    s.senha_do_archive = Some(senha.to_string());
+                    s.location = nova.clone();
+                }
+                if let Some(w) = weak.upgrade() {
+                    recarregar_janela(&w, &state);
+                }
+                if let Some(d) = dlg_weak.upgrade() {
+                    let _ = d.hide();
+                }
+            }
+            Err(evezip_engine::EngineError::SenhaIncorreta) => {
+                if let Some(d) = dlg_weak.upgrade() {
+                    d.set_mensagem("Senha incorreta, tente novamente.".into());
+                }
+            }
+            Err(e) => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_status(format!("Erro: {e}").into());
+                }
+                if let Some(d) = dlg_weak.upgrade() {
+                    let _ = d.hide();
+                }
+            }
+        }
+    });
+    let _ = dlg.show();
 }
 
 /// Recarga usada de dentro dos callbacks (sem &self).

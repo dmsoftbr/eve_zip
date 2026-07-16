@@ -1,0 +1,63 @@
+import { Button, ComboBox, SpinBox, LineEdit, CheckBox, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component CreateDialog inherits Window {
+    title: "Criar archive";
+    width: 420px;
+    height: 260px;
+
+    callback confirmar(string, int, string, bool);
+    callback cancelar();
+
+    VerticalBox {
+        HorizontalBox {
+            Text { text: "Formato:"; vertical-alignment: center; width: 120px; }
+            formato := ComboBox { model: ["7z", "zip", "tar", "tar.gz"]; current-value: "7z"; }
+        }
+        HorizontalBox {
+            Text { text: "Compressão (0-9):"; vertical-alignment: center; width: 120px; }
+            nivel := SpinBox { minimum: 0; maximum: 9; value: 5; }
+        }
+        HorizontalBox {
+            Text { text: "Senha:"; vertical-alignment: center; width: 120px; }
+            // tar/tar.gz não suportam senha no 7zz (ver evezip-engine::ops::create,
+            // que rejeita com OpcaoNaoSuportada) — o campo fica desabilitado para
+            // não sugerir uma proteção que não existiria.
+            senha := LineEdit {
+                input-type: password;
+                placeholder-text: "(sem senha)";
+                enabled: formato.current-value == "7z" || formato.current-value == "zip";
+            }
+        }
+        nomes := CheckBox {
+            text: "Criptografar nomes de arquivos (só 7z)";
+            enabled: formato.current-value == "7z";
+        }
+        HorizontalBox {
+            Button { text: "Cancelar"; clicked => { root.cancelar(); } }
+            Button {
+                text: "Criar";
+                primary: true;
+                clicked => { root.confirmar(formato.current-value, nivel.value, senha.text, nomes.checked); }
+            }
+        }
+    }
+}
+
+export component PasswordDialog inherits Window {
+    title: "Senha necessária";
+    width: 380px;
+    height: 150px;
+
+    in property <string> mensagem: "Este archive exige senha.";
+    callback confirmar(string);
+    callback cancelar();
+
+    VerticalBox {
+        Text { text: root.mensagem; wrap: word-wrap; }
+        senha := LineEdit { input-type: password; placeholder-text: "Senha"; }
+        HorizontalBox {
+            Button { text: "Cancelar"; clicked => { root.cancelar(); } }
+            Button { text: "OK"; primary: true; clicked => { root.confirmar(senha.text); } }
+        }
+    }
+}
