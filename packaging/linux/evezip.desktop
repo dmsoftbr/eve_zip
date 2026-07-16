@@ -4,5 +4,5 @@ Name=EveZip
 Comment=Compactar e extrair archives
 Exec=evezip %f
 Terminal=false
-Categories=Utility;Archiving;Compression;
-MimeType=application/zip;application/x-7z-compressed;application/vnd.rar;application/x-tar;application/gzip;
+Categories=Utility;Archiving;
+MimeType=application/zip;application/x-7z-compressed;application/vnd.rar;application/x-tar;application/gzip;application/x-compressed-tar;

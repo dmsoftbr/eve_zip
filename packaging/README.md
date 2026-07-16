@@ -6,6 +6,14 @@ manual, mas suficiente para distribuir a build entre máquinas confiáveis.
 
 ## macOS
 
+### Pré-requisitos
+
+A build requer um toolchain Rust estável funcional (via `rustup`), com
+`cargo` disponível no `PATH`. Se o Rust foi instalado via Homebrew
+(`brew install rustup`), é preciso rodar `rustup default stable` e garantir
+que o diretório `bin` do toolchain (normalmente `~/.cargo/bin`) esteja no
+`PATH` antes de executar o script de bundle.
+
 1. Rodar o script de bundle a partir da raiz do repositório:
 
    ```bash
@@ -70,8 +78,8 @@ manual via tarball:
    "diretório do executável".
 
 2. Importar `packaging/windows/associar.reg` (duplo-clique ou
-   `reg import associar.reg`) para associar `.zip`, `.7z`, `.rar`, `.tar`
-   e `.gz` ao EveZip. Se a instalação não for em
+   `reg import associar.reg`) para associar `.zip`, `.7z`, `.rar`, `.tar`,
+   `.gz` e `.tgz` ao EveZip. Se a instalação não for em
    `C:\Program Files\EveZip\evezip.exe`, ajustar o caminho no `.reg` antes
    de importar.
 
