@@ -293,6 +293,67 @@ fn create_substitui_archive_existente_em_vez_de_acrescentar() {
 }
 
 #[test]
+fn create_com_falha_preserva_archive_original() {
+    let d = sandbox("create-falha");
+    let eng = Engine::locate().unwrap();
+    let arq = d.join("out.7z");
+
+    // 1. Cria um archive válido com o conteúdo "a.txt".
+    let opts = CreateOptions {
+        format: Format::SevenZ,
+        level: 5,
+        password: None,
+        encrypt_names: false,
+    };
+    eng.create(
+        &arq,
+        &[d.join("in/a.txt")],
+        &opts,
+        &mut |_| {},
+        &CancelToken::new(),
+    )
+    .unwrap();
+    let antes = eng.list(&arq, None).unwrap();
+    assert_eq!(antes.len(), 1);
+
+    // 2. Cria de novo no MESMO caminho, mas com um input inexistente →
+    //    o 7zz falha no meio da criação.
+    let inexistente = d.join("in/nao-existe-jamais.txt");
+    let err = eng
+        .create(
+            &arq,
+            &[inexistente],
+            &opts,
+            &mut |_| {},
+            &CancelToken::new(),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            EngineError::Falha { .. } | EngineError::ArchiveCorrompido(_)
+        ),
+        "esperava erro de criação: {err:?}"
+    );
+
+    // 3. O archive ORIGINAL sobreviveu intacto e ainda lista corretamente.
+    assert!(arq.exists(), "o archive original foi destruído pela falha");
+    let depois = eng.list(&arq, None).unwrap();
+    assert_eq!(depois.len(), 1, "conteúdo do original mudou: {depois:?}");
+    assert!(depois[0].path.ends_with("a.txt"), "{depois:?}");
+
+    // 4. Não deixou lixo `.evezip-new-*` no diretório do archive.
+    let sobra = std::fs::read_dir(&d)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().contains(".evezip-new-"));
+    assert!(
+        !sobra,
+        "sobrou arquivo temporário .evezip-new-* no diretório"
+    );
+}
+
+#[test]
 fn senha_em_tar_gz_vira_erro() {
     let d = sandbox("tar-gz-senha");
     let eng = Engine::locate().unwrap();

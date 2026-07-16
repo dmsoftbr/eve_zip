@@ -33,6 +33,22 @@ fn eh_targz(archive: &Path) -> bool {
     s.ends_with(".tar.gz") || s.ends_with(".tgz")
 }
 
+/// Caminho temporário irmão de `archive` (mesmo diretório) usado durante a
+/// criação. Fica no mesmo sistema de arquivos que o destino final, então o
+/// rename para `archive` no sucesso é atômico. Único por processo para não
+/// colidir com outra instância.
+fn caminho_temp_de_criacao(archive: &Path) -> PathBuf {
+    let nome = archive
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "archive".into());
+    let temp_nome = format!(".{}.evezip-new-{}", nome, std::process::id());
+    match archive.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join(temp_nome),
+        _ => PathBuf::from(temp_nome),
+    }
+}
+
 /// Verifica se um caminho de entrada de archive é seguro para ser usado com
 /// `dest.join(entry)`: nenhum componente pode ser ".." (zip-slip / path
 /// traversal) e o caminho não pode ser absoluto (raiz Unix "/" ou raiz de
@@ -164,15 +180,28 @@ impl Engine {
                 "senha não é suportada em tar/tar.gz".into(),
             ));
         }
-        // 7zz `a` acrescenta a um archive existente em vez de substituí-lo,
-        // o que pode misturar entradas criptografadas e não criptografadas
-        // (ou nomes cifrados com não cifrados) num mesmo arquivo.
-        if archive.exists() {
-            std::fs::remove_file(archive)?;
-        }
-        match options.format {
-            Format::TarGz => self.create_targz(archive, inputs, on_progress, cancel),
-            _ => self.create_simple(archive, inputs, options, on_progress, cancel),
+        // Grava num arquivo temporário irmão (mesmo diretório → mesmo
+        // sistema de arquivos → rename atômico) e só substitui o original no
+        // sucesso. Assim, uma falha ou cancelamento no meio da criação nunca
+        // destrói o archive que o usuário já tinha. Também evita o problema do
+        // 7zz `a` acrescentar a um archive existente (misturando entradas
+        // cifradas e não cifradas): o temp é sempre novo.
+        let temp = caminho_temp_de_criacao(archive);
+        // Um temp de execução anterior (mesmo pid) pode ter sobrado; limpa.
+        let _ = std::fs::remove_file(&temp);
+        let resultado = match options.format {
+            Format::TarGz => self.create_targz(&temp, inputs, on_progress, cancel),
+            _ => self.create_simple(&temp, inputs, options, on_progress, cancel),
+        };
+        match resultado {
+            Ok(()) => {
+                std::fs::rename(&temp, archive)?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&temp);
+                Err(e)
+            }
         }
     }
 
