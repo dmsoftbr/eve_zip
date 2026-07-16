@@ -94,7 +94,7 @@ component FileRowItem inherits Rectangle {
     // ou um arquivo-archive no disco (extrair).
     property <bool> tem-menu: root.em-archive || root.entry.kind == 1;
 
-    ContextMenuArea {
+    menu := ContextMenuArea {
         enabled: root.tem-menu;
 
         // Barra de acento na seleção.
@@ -155,8 +155,17 @@ component FileRowItem inherits Rectangle {
             }
         }
         ta := TouchArea {
+            // Botão esquerdo: seleção / navegação (duplo-clique no Rust).
             clicked => {
                 root.clicked();
+            }
+            // Botão direito: abre o menu de contexto na posição do cursor.
+            // (Um TouchArea captura o clique antes do ContextMenuArea; por isso
+            // o menu é disparado manualmente aqui em vez de automaticamente.)
+            pointer-event(ev) => {
+                if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.down) {
+                    menu.show({ x: self.mouse-x, y: self.mouse-y });
+                }
             }
         }
 

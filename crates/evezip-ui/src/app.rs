@@ -282,24 +282,25 @@ impl App {
                     }
                 }
             };
-            let Some(dest) = rfd::FileDialog::new()
+            let Some(dest_escolhido) = rfd::FileDialog::new()
                 .set_title("Extrair para...")
                 .pick_folder()
             else {
                 return;
+            };
+            // Archive inteiro: cai numa subpasta numerada (nunca sobrescreve).
+            // Seleção específica: vai direto na pasta escolhida.
+            let dest = if entrada.is_none() {
+                destino_extracao(&dest_escolhido, &archive)
+            } else {
+                dest_escolhido
             };
             submeter(
                 &q,
                 &descricoes1,
                 &kinds1,
                 JobSpec {
-                    descricao: format!(
-                        "Extrair {}",
-                        archive
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    ),
+                    descricao: format!("Extrair {}", nome_de(&archive)),
                     kind: JobKind::Extract {
                         archive,
                         dest,
@@ -492,6 +493,43 @@ fn nome_de(p: &std::path::Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Nome-base de um archive para a pasta de extração: remove as extensões de
+/// archive conhecidas ("backup.tar.gz" → "backup", "x.7z" → "x").
+fn base_archive(archive: &std::path::Path) -> String {
+    let nome = nome_de(archive);
+    if nome.is_empty() {
+        return "extraido".into();
+    }
+    let lower = nome.to_lowercase();
+    for suf in [
+        ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".7z", ".rar", ".tar", ".gz",
+    ] {
+        if lower.ends_with(suf) {
+            return nome[..nome.len() - suf.len()].to_string();
+        }
+    }
+    nome
+}
+
+/// Pasta de destino para extrair o archive INTEIRO: subpasta com o nome do
+/// archive dentro de `escolhido`, numerada ("nome", "nome 2", "nome 3", ...)
+/// para nunca sobrescrever — como o Utilitário de Arquivos do macOS.
+fn destino_extracao(escolhido: &std::path::Path, archive: &std::path::Path) -> std::path::PathBuf {
+    let base = base_archive(archive);
+    let candidato = escolhido.join(&base);
+    if !candidato.exists() {
+        return candidato;
+    }
+    for n in 2..100_000 {
+        let c = escolhido.join(format!("{base} {n}"));
+        if !c.exists() {
+            return c;
+        }
+    }
+    // Fallback improvável: cai no candidato original.
+    candidato
 }
 
 /// Abre o `CreateDialog` para compactar `inputs`: pede formato/nível/senha e,
@@ -818,11 +856,18 @@ fn extrair_entrada(
             }
         }
     };
-    let Some(dest) = rfd::FileDialog::new()
+    let Some(dest_escolhido) = rfd::FileDialog::new()
         .set_title("Extrair para...")
         .pick_folder()
     else {
         return;
+    };
+    // Archive inteiro (arquivo-archive no disco): subpasta numerada.
+    // Entrada específica dentro de um archive: vai direto na pasta escolhida.
+    let dest = if entradas.is_none() {
+        destino_extracao(&dest_escolhido, &archive)
+    } else {
+        dest_escolhido
     };
     submeter(
         q,
@@ -987,6 +1032,40 @@ mod jobs_tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::sync::mpsc;
+
+    #[test]
+    fn base_archive_remove_extensoes() {
+        assert_eq!(base_archive(Path::new("/x/backup.7z")), "backup");
+        assert_eq!(base_archive(Path::new("/x/dados.tar.gz")), "dados");
+        assert_eq!(base_archive(Path::new("/x/fotos.TGZ")), "fotos");
+        assert_eq!(base_archive(Path::new("/x/relatório.zip")), "relatório");
+        // Sem extensão de archive: mantém o nome.
+        assert_eq!(base_archive(Path::new("/x/pasta")), "pasta");
+    }
+
+    #[test]
+    fn destino_extracao_numera_quando_ja_existe() {
+        let raiz = std::env::temp_dir().join(format!("evezip-destino-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        std::fs::create_dir_all(&raiz).unwrap();
+        let arq = Path::new("/qualquer/backup.7z");
+
+        // 1ª vez: usa "backup".
+        let d1 = destino_extracao(&raiz, arq);
+        assert_eq!(d1, raiz.join("backup"));
+        std::fs::create_dir_all(&d1).unwrap();
+
+        // 2ª vez (já existe "backup"): usa "backup 2".
+        let d2 = destino_extracao(&raiz, arq);
+        assert_eq!(d2, raiz.join("backup 2"));
+        std::fs::create_dir_all(&d2).unwrap();
+
+        // 3ª vez: "backup 3".
+        let d3 = destino_extracao(&raiz, arq);
+        assert_eq!(d3, raiz.join("backup 3"));
+
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
 
     struct EngineFalso;
     impl ArchiveEngine for EngineFalso {
