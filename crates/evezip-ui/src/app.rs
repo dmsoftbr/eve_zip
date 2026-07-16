@@ -108,16 +108,32 @@ impl App {
                     (s.location.clone(), nova)
                 };
                 if nova != loc {
-                    let ok = {
-                        let mut s = state.borrow_mut();
-                        let senha = s.senha_do_archive.clone();
-                        s.browser.list(&nova, senha.as_deref()).is_ok()
-                    };
-                    if ok {
-                        state.borrow_mut().location = nova;
-                    }
-                    if let Some(w) = weak.upgrade() {
-                        recarregar_janela(&w, &state); // mostra o erro na status bar se falhou
+                    let senha = state.borrow().senha_do_archive.clone();
+                    let resultado = state.borrow_mut().browser.list(&nova, senha.as_deref());
+                    match resultado {
+                        Ok(_) => {
+                            // Navegação válida: troca de location e, se saiu do
+                            // archive atual (ou foi para o disco), esquece a senha.
+                            let manter_senha = mesmo_archive(&loc, &nova);
+                            {
+                                let mut s = state.borrow_mut();
+                                s.location = nova;
+                                if !manter_senha {
+                                    s.senha_do_archive = None;
+                                }
+                            }
+                            if let Some(w) = weak.upgrade() {
+                                recarregar_janela(&w, &state);
+                            }
+                        }
+                        Err(e) => {
+                            // Navegação falhou (ex.: archive corrompido): NÃO navega
+                            // e NÃO recarrega — a tabela continua mostrando o
+                            // diretório atual; só a status bar é atualizada.
+                            if let Some(w) = weak.upgrade() {
+                                w.set_status(format!("Erro: {e}").into());
+                            }
+                        }
                     }
                 }
             }
@@ -146,6 +162,18 @@ impl App {
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
     }
+}
+
+/// Duas locations apontam para o mesmo archive (independente do `inner`)?
+/// Usado para decidir se a senha do archive deve ser mantida ao navegar
+/// entre diretórios internos do mesmo archive, ou esquecida ao trocar de
+/// archive (ou voltar ao disco).
+fn mesmo_archive(a: &Location, b: &Location) -> bool {
+    matches!(
+        (a, b),
+        (Location::Archive { archive: a1, .. }, Location::Archive { archive: a2, .. })
+            if a1 == a2
+    )
 }
 
 /// Recarga usada de dentro dos callbacks (sem &self).

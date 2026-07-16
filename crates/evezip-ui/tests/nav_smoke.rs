@@ -96,7 +96,11 @@ fn archive_corrompido_nao_navega() {
     assert_ne!(alvo, no_disco);
 
     let erro = browser.list(&alvo, None).unwrap_err();
-    let _ = format!("Erro: {erro}"); // é isso que vai para a status bar
+    let msg = format!("Erro: {erro}"); // é isso que vai para a status bar
+    assert!(
+        msg.starts_with("Erro: archive corrompido"),
+        "mensagem inesperada na status bar: {msg:?}"
+    );
 
     // Endurecimento do Step 2: como `list` falhou, a location NÃO deve mudar.
     let loc_final = tentar_navegar(&mut browser, &no_disco, alvo, None);
