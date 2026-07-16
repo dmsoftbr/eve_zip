@@ -1,4 +1,6 @@
 import { StandardTableView, Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { JobsPanel, JobRow } from "jobs.slint";
+export { JobRow }
 
 export component AppWindow inherits Window {
     title: "EveZip";
@@ -8,12 +10,14 @@ export component AppWindow inherits Window {
     in property <[[StandardListViewItem]]> rows;
     in property <string> caminho;
     in property <string> status;
+    in property <[JobRow]> jobs;
 
     callback linha-click(int);   // clique numa linha (Rust decide duplo-clique)
     callback subir();
     callback extrair();
     callback adicionar();
     callback testar();
+    callback cancelar-job(int);
 
     out property <int> linha-atual: tabela.current-row;
 
@@ -44,6 +48,10 @@ export component AppWindow inherits Window {
                     root.linha-click(row);
                 }
             }
+        }
+        JobsPanel {
+            jobs: root.jobs;
+            cancelar(id) => { root.cancelar-job(id); }
         }
         Text { text: root.status; height: 20px; }
     }

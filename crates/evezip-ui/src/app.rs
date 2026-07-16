@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, ModelRc, StandardListViewItem, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, StandardListViewItem, VecModel, Weak};
 
-use evezip_core::{ArchiveEngine, Browser, Location, Row};
+use evezip_core::{ArchiveEngine, Browser, JobEvent, JobId, JobKind, JobQueue, JobSpec, Location, Row};
 
 use crate::format::tamanho_humano;
 
@@ -153,10 +154,96 @@ impl App {
             }
         });
 
-        // extrair/adicionar/testar ganham corpo nas Tasks 12–13.
+        // extrair/testar ganham corpo em `instalar_fila` (chamado pelo main.rs
+        // após a fila de jobs existir). adicionar ganha corpo na Task 13.
         self.window.on_extrair(|| {});
         self.window.on_adicionar(|| {});
         self.window.on_testar(|| {});
+    }
+
+    pub fn window_weak(&self) -> Weak<AppWindow> {
+        self.window.as_weak()
+    }
+
+    /// Liga extrair/testar/cancelar-job à fila de jobs. Chamado pelo `main.rs`
+    /// depois de `App::new`, uma vez que a fila (e a ponte de eventos) exista.
+    /// Substitui os `on_extrair`/`on_testar` vazios instalados em
+    /// `instalar_callbacks`.
+    pub fn instalar_fila(&self, queue: Arc<JobQueue>) {
+        let state = Rc::clone(&self.state);
+        let weak = self.window.as_weak();
+        let q = Arc::clone(&queue);
+
+        self.window.on_extrair(move || {
+            let (archive, senha, entrada) = {
+                let s = state.borrow();
+                match &s.location {
+                    Location::Archive { archive, inner } => {
+                        // Extrai a linha selecionada (se houver); senão, o archive inteiro.
+                        let linha = weak.upgrade().map(|w| w.get_linha_atual()).unwrap_or(-1);
+                        let sel = if linha >= 0 {
+                            s.rows.get(linha as usize).map(|r| {
+                                let base = if inner.is_empty() {
+                                    r.name.clone()
+                                } else {
+                                    format!("{inner}/{}", r.name)
+                                };
+                                vec![base]
+                            })
+                        } else {
+                            None
+                        };
+                        (archive.clone(), s.senha_do_archive.clone(), sel)
+                    }
+                    Location::Disk(dir) => {
+                        // No disco: extrai o archive selecionado na tabela.
+                        let linha = weak.upgrade().map(|w| w.get_linha_atual()).unwrap_or(-1);
+                        let Some(r) = (linha >= 0)
+                            .then(|| s.rows.get(linha as usize))
+                            .flatten()
+                            .filter(|r| Browser::is_archive_file(&r.name))
+                        else {
+                            if let Some(w) = weak.upgrade() {
+                                w.set_status("Selecione um archive para extrair".into());
+                            }
+                            return;
+                        };
+                        (dir.join(&r.name), None, None)
+                    }
+                }
+            };
+            let Some(dest) = rfd::FileDialog::new().set_title("Extrair para...").pick_folder() else {
+                return;
+            };
+            submeter(
+                &q,
+                JobSpec {
+                    descricao: format!(
+                        "Extrair {}",
+                        archive.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                    ),
+                    kind: JobKind::Extract { archive, dest, entries: entrada, password: senha },
+                },
+            );
+        });
+
+        let q = Arc::clone(&queue);
+        let state2 = Rc::clone(&self.state);
+        self.window.on_testar(move || {
+            let s = state2.borrow();
+            if let Location::Archive { archive, .. } = &s.location {
+                submeter(
+                    &q,
+                    JobSpec {
+                        descricao: format!("Testar {}", archive.display()),
+                        kind: JobKind::Test { archive: archive.clone(), password: s.senha_do_archive.clone() },
+                    },
+                );
+            }
+        });
+
+        let q = Arc::clone(&queue);
+        self.window.on_cancelar_job(move |id| q.cancel(id as JobId));
     }
 
     pub fn run(&self) -> Result<(), slint::PlatformError> {
@@ -189,5 +276,133 @@ pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
             s.rows = rows;
         }
         Err(e) => w.set_status(format!("Erro: {e}").into()),
+    }
+}
+
+/// Mapa global id → descrição, usado para preencher `JobRow.descricao` quando
+/// o evento `Started` chega (ele só carrega o id). Preenchido em `submeter`
+/// antes do job aparecer no painel; limpo nos eventos terminais.
+fn descricoes() -> &'static Mutex<HashMap<JobId, String>> {
+    static M: OnceLock<Mutex<HashMap<JobId, String>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Único ponto de submissão de jobs na UI: registra a descrição e submete.
+/// Todo `q.submit(spec)` de um callback da UI deve passar por aqui.
+pub fn submeter(q: &JobQueue, spec: JobSpec) -> JobId {
+    let descricao = spec.descricao.clone();
+    let id = q.submit(spec);
+    descricoes().lock().unwrap().insert(id, descricao);
+    id
+}
+
+/// Aplica um `JobEvent` ao modelo `jobs` da janela. Roda no thread da UI
+/// (agendado via `Weak::upgrade_in_event_loop` a partir da thread-ponte em
+/// `main.rs`).
+pub fn aplicar_evento(w: &AppWindow, ev: JobEvent) {
+    type Mudanca = Box<dyn Fn(&mut JobRow)>;
+
+    let modelo = w.get_jobs();
+    let mut jobs: Vec<JobRow> = modelo.iter().collect();
+
+    let (id, mudanca): (JobId, Mudanca) = match ev {
+        JobEvent::Started(id) => {
+            let descricao = descricoes().lock().unwrap().get(&id).cloned().unwrap_or_default();
+            jobs.push(JobRow {
+                id: id as i32,
+                descricao: descricao.into(),
+                progresso: 0,
+                estado: "executando".into(),
+            });
+            (id, Box::new(|_: &mut JobRow| {}))
+        }
+        JobEvent::Progress(id, p) => (id, Box::new(move |j: &mut JobRow| j.progresso = p as i32)),
+        JobEvent::Done(id) => {
+            descricoes().lock().unwrap().remove(&id);
+            (
+                id,
+                Box::new(|j: &mut JobRow| {
+                    j.progresso = 100;
+                    j.estado = "concluído".into();
+                }),
+            )
+        }
+        JobEvent::Failed(id, e) => {
+            descricoes().lock().unwrap().remove(&id);
+            let msg = slint::SharedString::from(format!("erro: {e}"));
+            (id, Box::new(move |j: &mut JobRow| j.estado = msg.clone()))
+        }
+        JobEvent::Cancelled(id) => {
+            descricoes().lock().unwrap().remove(&id);
+            (id, Box::new(|j: &mut JobRow| j.estado = "cancelado".into()))
+        }
+    };
+    for j in jobs.iter_mut() {
+        if j.id == id as i32 {
+            mudanca(j);
+        }
+    }
+    w.set_jobs(ModelRc::new(VecModel::from(jobs)));
+}
+
+#[cfg(test)]
+mod jobs_tests {
+    //! Testa `submeter`/`descricoes` sem UI: são funções livres que não
+    //! dependem da janela Slint (só `aplicar_evento` precisa de `AppWindow`,
+    //! que exige uma janela real — fora do escopo automatizável aqui).
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use evezip_engine::{ArchiveEntry, CancelToken, CreateOptions, EngineError};
+    use std::path::Path;
+
+    struct EngineFalso;
+    impl ArchiveEngine for EngineFalso {
+        fn list(&self, _: &Path, _: Option<&str>) -> Result<Vec<ArchiveEntry>, EngineError> {
+            Ok(vec![])
+        }
+        fn extract(
+            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
+            _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn create(
+            &self, _: &Path, _: &[PathBuf], _: &CreateOptions,
+            _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn test(
+            &self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn submeter_registra_descricao_antes_do_started_chegar() {
+        let (tx, rx) = mpsc::channel();
+        let q = JobQueue::new(Arc::new(EngineFalso), tx);
+        let id = submeter(
+            &q,
+            JobSpec {
+                descricao: "Testar a.7z".into(),
+                kind: JobKind::Test { archive: PathBuf::from("/x/a.7z"), password: None },
+            },
+        );
+
+        // O evento Started chega (potencialmente já emitido pela worker thread
+        // antes de `submeter` retornar) — o mapa deve conter a descrição
+        // independentemente da corrida, pois `aplicar_evento` só é chamado a
+        // partir do event loop da UI, sempre depois de `submeter` retornar.
+        let started = rx.recv().unwrap();
+        assert!(matches!(started, JobEvent::Started(i) if i == id));
+        assert_eq!(descricoes().lock().unwrap().get(&id).cloned(), Some("Testar a.7z".to_string()));
+
+        // Consome o evento terminal para não vazar a thread do worker (join
+        // implícito via drop do sender ao sair de escopo já é suficiente para
+        // o teste, mas drenar deixa a intenção clara).
+        let _ = rx.recv();
     }
 }
