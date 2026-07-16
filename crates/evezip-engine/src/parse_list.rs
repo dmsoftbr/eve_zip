@@ -4,6 +4,7 @@ use crate::entry::ArchiveEntry;
 /// Entradas vêm após a linha "----------", em blocos "Chave = Valor"
 /// separados por linha em branco.
 pub fn parse_slt(output: &str) -> Vec<ArchiveEntry> {
+    let output = output.replace("\r\n", "\n");
     let corpo = match output.split("----------").nth(1) {
         Some(c) => c,
         None => return Vec::new(),
@@ -143,5 +144,20 @@ Path = a.txt
     #[test]
     fn ignora_cabecalho_antes_do_separador() {
         assert!(parse_slt("7-Zip banner\nPath = nao-e-entrada\n").is_empty());
+    }
+
+    #[test]
+    fn aceita_saida_com_crlf() {
+        let saida = "----------\r\nPath = src\r\nFolder = +\r\nSize = 0\r\nPacked Size = 0\r\n\r\nPath = src/main.rs\r\nFolder = -\r\nSize = 1234\r\nPacked Size = 600\r\n";
+        let e = parse_slt(saida);
+        assert_eq!(e.len(), 2);
+
+        assert_eq!(e[0].path, "src");
+        assert!(e[0].is_dir);
+        assert_eq!(e[0].size, 0);
+
+        assert_eq!(e[1].path, "src/main.rs");
+        assert!(!e[1].is_dir);
+        assert_eq!(e[1].size, 1234);
     }
 }
