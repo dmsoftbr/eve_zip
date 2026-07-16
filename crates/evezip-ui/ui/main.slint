@@ -1,0 +1,50 @@
+import { StandardTableView, Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "EveZip";
+    min-width: 760px;
+    min-height: 500px;
+
+    in property <[[StandardListViewItem]]> rows;
+    in property <string> caminho;
+    in property <string> status;
+
+    callback linha-click(int);   // clique numa linha (Rust decide duplo-clique)
+    callback subir();
+    callback extrair();
+    callback adicionar();
+    callback testar();
+
+    out property <int> linha-atual: tabela.current-row;
+
+    VerticalBox {
+        HorizontalBox {
+            height: 44px;
+            Button { text: "＋ Adicionar"; clicked => { root.adicionar(); } }
+            Button { text: "⬇ Extrair"; clicked => { root.extrair(); } }
+            Button { text: "✓ Testar"; clicked => { root.testar(); } }
+            Button { text: "⬆"; width: 36px; clicked => { root.subir(); } }
+            Text {
+                text: root.caminho;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+        tabela := StandardTableView {
+            columns: [
+                { title: "Nome", horizontal-stretch: 2 },
+                { title: "Tamanho" },
+                { title: "Comprimido" },
+                { title: "Modificado" },
+            ];
+            rows: root.rows;
+            row-pointer-event(row, event, position) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.linha-click(row);
+                }
+            }
+        }
+        Text { text: root.status; height: 20px; }
+    }
+}
