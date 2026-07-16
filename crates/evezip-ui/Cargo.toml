@@ -1,0 +1,12 @@
+[package]
+name = "evezip-ui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "evezip"
+path = "src/main.rs"
+
+[dependencies]
+evezip-core = { path = "../evezip-core" }
+evezip-engine = { path = "../evezip-engine" }

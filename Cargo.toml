@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/evezip-engine", "crates/evezip-core", "crates/evezip-ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

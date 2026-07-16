@@ -1,0 +1,7 @@
+[package]
+name = "evezip-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+evezip-engine = { path = "../evezip-engine" }
