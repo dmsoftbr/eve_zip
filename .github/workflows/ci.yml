@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependências de UI (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+
+      - name: Vendorizar 7zz (mac/linux)
+        if: runner.os != 'Windows'
+        run: ./scripts/fetch-7zz.sh
+
+      - name: 7-Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install 7zip -y
+          echo "EVEZIP_7ZZ=C:\Program Files\7-Zip\7z.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Formatação e lints
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace -- -D warnings
+
+      - name: Testes
+        run: cargo test --workspace
