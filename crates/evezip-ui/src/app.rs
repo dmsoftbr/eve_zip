@@ -108,11 +108,16 @@ impl App {
                     (s.location.clone(), nova)
                 };
                 if nova != loc {
-                    state.borrow_mut().location = nova;
-                    state.borrow_mut().senha_do_archive = None;
+                    let ok = {
+                        let mut s = state.borrow_mut();
+                        let senha = s.senha_do_archive.clone();
+                        s.browser.list(&nova, senha.as_deref()).is_ok()
+                    };
+                    if ok {
+                        state.borrow_mut().location = nova;
+                    }
                     if let Some(w) = weak.upgrade() {
-                        // Recarrega via App auxiliar (mesma lógica de recarregar()).
-                        recarregar_janela(&w, &state);
+                        recarregar_janela(&w, &state); // mostra o erro na status bar se falhou
                     }
                 }
             }
