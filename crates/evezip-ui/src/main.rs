@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
-use evezip_core::{ArchiveEngine, Browser, JobQueue, Location};
+use evezip_core::{ArchiveEngine, Browser, Config, JobQueue, Location};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -62,13 +62,16 @@ fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Opt
 
 /// Abre a janela principal, opcionalmente já posicionada num archive ou pasta.
 fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
+    let config = Config::load();
     let inicial = match caminho {
         Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => Location::Archive {
             archive: p,
             inner: String::new(),
         },
         Some(p) => Location::Disk(p),
-        None => Location::Disk(dirs_home().unwrap_or_else(|| PathBuf::from("/"))),
+        // Sem caminho na linha de comando: retoma a última pasta usada se ela
+        // ainda existir; caso contrário, abre no home.
+        None => Location::Disk(pasta_inicial(&config)),
     };
     let app = app::App::new(Arc::clone(&engine), inicial).expect("falha ao criar janela");
 
@@ -95,7 +98,35 @@ fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
     });
 
     app.run().expect("event loop");
+
+    // Persiste a pasta atual (última usada) para a próxima abertura.
+    let dir_atual = pasta_de(&app.state.borrow().location);
+    let mut config = config;
+    config.ultima_pasta = Some(dir_atual);
+    let _ = config.save();
+
     preview::limpar_temp();
+}
+
+/// Pasta em que a navegação está agora: o próprio diretório no disco, ou o
+/// diretório que contém o archive aberto.
+fn pasta_de(location: &Location) -> PathBuf {
+    match location {
+        Location::Disk(dir) => dir.clone(),
+        Location::Archive { archive, .. } => archive
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs_home().unwrap_or_else(|| PathBuf::from("/"))),
+    }
+}
+
+/// Pasta inicial ao abrir sem argumento: a última usada, se ainda existir;
+/// senão, o home.
+fn pasta_inicial(config: &Config) -> PathBuf {
+    match &config.ultima_pasta {
+        Some(p) if p.is_dir() => p.clone(),
+        _ => dirs_home().unwrap_or_else(|| PathBuf::from("/")),
+    }
 }
 
 fn dirs_home() -> Option<PathBuf> {
