@@ -62,9 +62,16 @@ pub fn find_7zz() -> Result<PathBuf, EngineError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // find_7zz() lê a variável de ambiente global EVEZIP_7ZZ. Os testes abaixo
+    // fazem set_var/remove_var nela, e o Rust roda testes em paralelo por padrão,
+    // então sem essa serialização há uma corrida latente entre eles (flake em CI).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn respeita_variavel_de_ambiente() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let fake = std::env::temp_dir().join("evezip-fake-7zz");
         std::fs::write(&fake, b"").unwrap();
         std::env::set_var("EVEZIP_7ZZ", &fake);
@@ -74,6 +81,7 @@ mod tests {
 
     #[test]
     fn encontra_binario_vendorizado() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         std::env::remove_var("EVEZIP_7ZZ");
         // pré-condição: scripts/fetch-7zz.sh já rodou
         let p = find_7zz().expect("rode scripts/fetch-7zz.sh antes dos testes");
