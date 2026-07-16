@@ -30,6 +30,14 @@ pub struct State {
     pub dialogo_aberto: bool,
 }
 
+impl State {
+    /// Getter usado pelo preview (Task 14): expõe o `Arc<dyn ArchiveEngine>`
+    /// do `Browser` sem expor o `Browser` inteiro.
+    pub fn browser_engine(&self) -> Arc<dyn ArchiveEngine> {
+        self.browser.engine()
+    }
+}
+
 pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<ModelRc<StandardListViewItem>> {
     let linhas: Vec<ModelRc<StandardListViewItem>> = rows
         .iter()
@@ -112,6 +120,32 @@ impl App {
                 let (loc, nova) = {
                     let s = state.borrow();
                     let Some(r) = s.rows.get(row as usize) else { return };
+                    // Arquivo dentro de um archive: preview via app padrão do
+                    // SO em vez de navegar (Task 14). `browser.enter` devolve
+                    // a própria location nesse caso (dead-end), então
+                    // intercepta antes de chegar lá.
+                    if let Location::Archive { archive, inner } = &s.location {
+                        if !r.is_dir {
+                            let entrada = if inner.is_empty() {
+                                r.name.clone()
+                            } else {
+                                format!("{inner}/{}", r.name)
+                            };
+                            let archive = archive.clone();
+                            let senha = s.senha_do_archive.clone();
+                            let eng = s.browser_engine();
+                            let res = crate::preview::abrir_preview(
+                                &eng,
+                                &archive,
+                                &entrada,
+                                senha.as_deref(),
+                            );
+                            if let (Err(e), Some(w)) = (res, weak.upgrade()) {
+                                w.set_status(format!("Erro no preview: {e}").into());
+                            }
+                            return;
+                        }
+                    }
                     let nova = s.browser.enter(&s.location, &r.name, r.is_dir);
                     (s.location.clone(), nova)
                 };

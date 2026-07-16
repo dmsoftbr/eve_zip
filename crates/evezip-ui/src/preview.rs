@@ -1,0 +1,96 @@
+//! Preview de um arquivo dentro de um archive: extrai a entrada única para um
+//! diretório temporário estável (`evezip-preview-<pid>`) e abre com o app
+//! padrão do SO. `limpar_temp` remove esse diretório (chamado ao sair, em
+//! `main.rs`).
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use evezip_core::ArchiveEngine;
+use evezip_engine::{CancelToken, EngineError};
+
+fn temp_root() -> PathBuf {
+    std::env::temp_dir().join(format!("evezip-preview-{}", std::process::id()))
+}
+
+pub fn abrir_preview(
+    engine: &Arc<dyn ArchiveEngine>,
+    archive: &Path,
+    entry_path: &str,
+    password: Option<&str>,
+) -> Result<(), EngineError> {
+    let dest = temp_root();
+    std::fs::create_dir_all(&dest)?;
+    engine.extract(
+        archive,
+        &dest,
+        Some(&[entry_path.to_string()]),
+        password,
+        &mut |_| {},
+        &CancelToken::new(),
+    )?;
+    let alvo = dest.join(entry_path);
+    if std::env::var_os("EVEZIP_PREVIEW_NO_OPEN").is_none() {
+        abrir_com_app_padrao(&alvo)?;
+    }
+    Ok(())
+}
+
+pub fn limpar_temp() {
+    let _ = std::fs::remove_dir_all(temp_root());
+}
+
+fn abrir_com_app_padrao(p: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = { let mut c = std::process::Command::new("open"); c.arg(p); c };
+    #[cfg(target_os = "linux")]
+    let mut cmd = { let mut c = std::process::Command::new("xdg-open"); c.arg(p); c };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]).arg(p);
+        c
+    };
+    cmd.spawn().map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use evezip_engine::{ArchiveEntry, CreateOptions};
+    use std::sync::Mutex;
+
+    struct EngineGravador {
+        extraidos: Mutex<Vec<String>>,
+    }
+
+    impl ArchiveEngine for EngineGravador {
+        fn list(&self, _: &Path, _: Option<&str>) -> Result<Vec<ArchiveEntry>, EngineError> {
+            Ok(vec![])
+        }
+        fn extract(
+            &self, _: &Path, dest: &Path, entries: Option<&[String]>, _: Option<&str>,
+            _: &mut dyn FnMut(u8), _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            let e = entries.unwrap()[0].clone();
+            let alvo = dest.join(&e);
+            std::fs::create_dir_all(alvo.parent().unwrap()).unwrap();
+            std::fs::write(&alvo, "conteudo").unwrap();
+            self.extraidos.lock().unwrap().push(e);
+            Ok(())
+        }
+        fn create(&self, _: &Path, _: &[PathBuf], _: &CreateOptions, _: &mut dyn FnMut(u8), _: &CancelToken) -> Result<(), EngineError> { Ok(()) }
+        fn test(&self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken) -> Result<(), EngineError> { Ok(()) }
+    }
+
+    #[test]
+    fn extrai_entrada_unica_para_temp() {
+        // Só valida a extração; abrir o app padrão é ignorado se EVEZIP_PREVIEW_NO_OPEN=1.
+        std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
+        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador { extraidos: Mutex::new(vec![]) });
+        abrir_preview(&eng, Path::new("/x/a.7z"), "sub/nota.txt", None).unwrap();
+        assert!(temp_root().join("sub/nota.txt").exists());
+        limpar_temp();
+        assert!(!temp_root().exists());
+    }
+}

@@ -28,6 +28,12 @@ impl Browser {
         Browser { engine, cache: None }
     }
 
+    /// Clona o `Arc` do engine subjacente — usado pelo preview (Task 14) para
+    /// extrair uma única entrada sem depender de `list`/`enter`.
+    pub fn engine(&self) -> Arc<dyn ArchiveEngine> {
+        Arc::clone(&self.engine)
+    }
+
     pub fn is_archive_file(name: &str) -> bool {
         let lower = name.to_lowercase();
         EXTENSOES.iter().any(|e| lower.ends_with(&format!(".{e}")))

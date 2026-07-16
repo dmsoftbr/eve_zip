@@ -1,5 +1,6 @@
 mod app;
 mod format;
+mod preview;
 
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
@@ -42,6 +43,7 @@ fn main() {
     });
 
     app.run().expect("event loop");
+    preview::limpar_temp();
 }
 
 fn dirs_home() -> Option<std::path::PathBuf> {
