@@ -1,42 +1,36 @@
 name: CI
+
+# Roda só em PRs e em push na main. Não roda a cada push em branches de
+# feature (o PR já cobre isso) — evita disparar dois runs por push.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# Um push novo cancela o run anterior do mesmo ref (economiza minutos).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # EveZip é um app focado em macOS (Apple Events, bundle .app, /Applications).
+    # A UI (rfd/Slint) e o motor 7zz têm particularidades por plataforma; o
+    # alvo suportado e testado é o macOS. Linux/Windows podem voltar à matriz
+    # quando/se houver suporte de 1ª classe.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Dependências de UI (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
-
-      - name: Vendorizar 7zz (mac/linux)
-        if: runner.os != 'Windows'
+      - name: Vendorizar 7zz
         run: ./scripts/fetch-7zz.sh
 
-      - name: 7-Zip (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          choco install 7zip -y
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          echo "EVEZIP_7ZZ=C:\Program Files\7-Zip\7z.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Formatação e lints
-        shell: bash
         run: |
           cargo fmt --check
-          cargo clippy --workspace -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Testes
         run: cargo test --workspace
