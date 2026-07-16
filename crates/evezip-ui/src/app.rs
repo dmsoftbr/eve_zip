@@ -676,6 +676,52 @@ fn pedir_senha_e_reenviar_job(
     let _ = dlg.show();
 }
 
+/// Abre um caminho vindo do SO (Finder / `open` no macOS): navega até o archive
+/// (ou entra na pasta). Se o archive exigir senha, dispara o fluxo de senha.
+/// Arquivos comuns são ignorados.
+pub fn abrir_caminho_externo(
+    state: &Rc<std::cell::RefCell<State>>,
+    weak: &Weak<AppWindow>,
+    path: std::path::PathBuf,
+) {
+    let nova = if Browser::is_archive_file(&path.to_string_lossy()) {
+        Location::Archive {
+            archive: path,
+            inner: String::new(),
+        }
+    } else if path.is_dir() {
+        Location::Disk(path)
+    } else {
+        return;
+    };
+
+    let senha = state.borrow().senha_do_archive.clone();
+    let resultado = state.borrow_mut().browser.list(&nova, senha.as_deref());
+    match resultado {
+        Ok(_) => {
+            {
+                let mut s = state.borrow_mut();
+                s.location = nova;
+                s.senha_do_archive = None;
+            }
+            if let Some(w) = weak.upgrade() {
+                recarregar_janela(&w, state);
+            }
+        }
+        Err(evezip_engine::EngineError::SenhaNecessaria) => {
+            pedir_senha_e_navegar(state, weak, nova, "Este archive exige senha.");
+        }
+        Err(evezip_engine::EngineError::SenhaIncorreta) => {
+            pedir_senha_e_navegar(state, weak, nova, "Senha incorreta, tente novamente.");
+        }
+        Err(e) => {
+            if let Some(w) = weak.upgrade() {
+                w.set_status(format!("Erro: {e}").into());
+            }
+        }
+    }
+}
+
 /// Recarga usada de dentro dos callbacks (sem &self).
 pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
     let mut s = state.borrow_mut();

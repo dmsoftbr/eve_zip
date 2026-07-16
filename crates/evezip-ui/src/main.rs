@@ -1,10 +1,14 @@
 mod app;
 mod cli;
 mod format;
+#[cfg(target_os = "macos")]
+mod macos_open;
 mod preview;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 
 use evezip_core::{ArchiveEngine, Browser, Config, JobQueue, Location};
@@ -108,6 +112,27 @@ fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
                 .upgrade_in_event_loop(move |w| app::aplicar_evento(&w, &descricoes, &kinds, ev));
         }
     });
+
+    // macOS: Finder e `open` entregam o arquivo por Apple Event (não por argv).
+    // Instala o handler e drena os caminhos recebidos por um timer na UI thread,
+    // navegando até o archive. Mantido vivo até o fim de `run()`.
+    #[cfg(target_os = "macos")]
+    let _timer_open = {
+        macos_open::install();
+        let state = Rc::clone(&app.state);
+        let weak = app.window_weak();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                for path in macos_open::take_pending() {
+                    app::abrir_caminho_externo(&state, &weak, path);
+                }
+            },
+        );
+        timer
+    };
 
     app.run().expect("event loop");
 
