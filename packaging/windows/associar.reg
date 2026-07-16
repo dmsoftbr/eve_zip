@@ -1,0 +1,22 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\EveZip.Archive]
+@="Archive EveZip"
+
+[HKEY_CURRENT_USER\Software\Classes\EveZip.Archive\shell\open\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\.zip]
+@="EveZip.Archive"
+
+[HKEY_CURRENT_USER\Software\Classes\.7z]
+@="EveZip.Archive"
+
+[HKEY_CURRENT_USER\Software\Classes\.rar]
+@="EveZip.Archive"
+
+[HKEY_CURRENT_USER\Software\Classes\.tar]
+@="EveZip.Archive"
+
+[HKEY_CURRENT_USER\Software\Classes\.gz]
+@="EveZip.Archive"
