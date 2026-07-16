@@ -58,9 +58,17 @@ pub fn limpar_temp() {
 
 fn abrir_com_app_padrao(p: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
-    let mut cmd = { let mut c = std::process::Command::new("open"); c.arg(p); c };
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(p);
+        c
+    };
     #[cfg(target_os = "linux")]
-    let mut cmd = { let mut c = std::process::Command::new("xdg-open"); c.arg(p); c };
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(p);
+        c
+    };
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("cmd");
@@ -85,8 +93,13 @@ mod tests {
             Ok(vec![])
         }
         fn extract(
-            &self, _: &Path, dest: &Path, entries: Option<&[String]>, _: Option<&str>,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            dest: &Path,
+            entries: Option<&[String]>,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             let e = entries.unwrap()[0].clone();
             let alvo = dest.join(&e);
@@ -95,15 +108,34 @@ mod tests {
             self.extraidos.lock().unwrap().push(e);
             Ok(())
         }
-        fn create(&self, _: &Path, _: &[PathBuf], _: &CreateOptions, _: &mut dyn FnMut(u8), _: &CancelToken) -> Result<(), EngineError> { Ok(()) }
-        fn test(&self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken) -> Result<(), EngineError> { Ok(()) }
+        fn create(
+            &self,
+            _: &Path,
+            _: &[PathBuf],
+            _: &CreateOptions,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn test(
+            &self,
+            _: &Path,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
     }
 
     #[test]
     fn extrai_entrada_unica_para_temp() {
         // Só valida a extração; abrir o app padrão é ignorado se EVEZIP_PREVIEW_NO_OPEN=1.
         std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
-        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador { extraidos: Mutex::new(vec![]) });
+        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador {
+            extraidos: Mutex::new(vec![]),
+        });
         abrir_preview(&eng, Path::new("/x/a.7z"), "sub/nota.txt", None).unwrap();
         assert!(temp_root().join("sub/nota.txt").exists());
         limpar_temp();
@@ -115,8 +147,11 @@ mod tests {
         // Zip-slip: uma entrada "../../../foo" nunca deve chegar a extract()
         // nem a dest.join() — o preview tem que barrar antes.
         std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
-        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador { extraidos: Mutex::new(vec![]) });
-        let err = abrir_preview(&eng, Path::new("/x/a.7z"), "../../../etc/passwd", None).unwrap_err();
+        let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador {
+            extraidos: Mutex::new(vec![]),
+        });
+        let err =
+            abrir_preview(&eng, Path::new("/x/a.7z"), "../../../etc/passwd", None).unwrap_err();
         assert!(matches!(err, EngineError::CaminhoInvalido(_)), "{err:?}");
         limpar_temp();
     }

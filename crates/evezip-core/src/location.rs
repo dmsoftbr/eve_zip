@@ -19,7 +19,10 @@ impl Location {
                         Some((pai, _)) => pai.to_string(),
                         None => String::new(),
                     };
-                    Some(Location::Archive { archive: archive.clone(), inner: novo })
+                    Some(Location::Archive {
+                        archive: archive.clone(),
+                        inner: novo,
+                    })
                 }
             }
         }
@@ -46,7 +49,10 @@ mod tests {
 
     #[test]
     fn parent_dentro_do_archive() {
-        let l = Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: "src/sub".into() };
+        let l = Location::Archive {
+            archive: PathBuf::from("/x/a.7z"),
+            inner: "src/sub".into(),
+        };
         match l.parent().unwrap() {
             Location::Archive { inner, .. } => assert_eq!(inner, "src"),
             _ => panic!(),
@@ -55,7 +61,10 @@ mod tests {
 
     #[test]
     fn parent_da_raiz_do_archive_volta_ao_disco() {
-        let l = Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: String::new() };
+        let l = Location::Archive {
+            archive: PathBuf::from("/x/a.7z"),
+            inner: String::new(),
+        };
         match l.parent().unwrap() {
             Location::Disk(p) => assert_eq!(p, PathBuf::from("/x")),
             _ => panic!(),
@@ -64,13 +73,19 @@ mod tests {
 
     #[test]
     fn parent_de_disco() {
-        assert!(matches!(Location::Disk(PathBuf::from("/x/y")).parent(), Some(Location::Disk(_))));
+        assert!(matches!(
+            Location::Disk(PathBuf::from("/x/y")).parent(),
+            Some(Location::Disk(_))
+        ));
         assert!(Location::Disk(PathBuf::from("/")).parent().is_none());
     }
 
     #[test]
     fn display_de_archive() {
-        let l = Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: "src".into() };
+        let l = Location::Archive {
+            archive: PathBuf::from("/x/a.7z"),
+            inner: "src".into(),
+        };
         assert_eq!(l.display(), "/x/a.7z/src/");
     }
 }

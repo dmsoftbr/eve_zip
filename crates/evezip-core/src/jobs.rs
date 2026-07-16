@@ -12,9 +12,21 @@ pub type JobId = u64;
 
 #[derive(Debug, Clone)]
 pub enum JobKind {
-    Extract { archive: PathBuf, dest: PathBuf, entries: Option<Vec<String>>, password: Option<String> },
-    Create { archive: PathBuf, inputs: Vec<PathBuf>, options: CreateOptions },
-    Test { archive: PathBuf, password: Option<String> },
+    Extract {
+        archive: PathBuf,
+        dest: PathBuf,
+        entries: Option<Vec<String>>,
+        password: Option<String>,
+    },
+    Create {
+        archive: PathBuf,
+        inputs: Vec<PathBuf>,
+        options: CreateOptions,
+    },
+    Test {
+        archive: PathBuf,
+        password: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -65,9 +77,14 @@ impl JobQueue {
                 let _ = ev.send(JobEvent::Progress(id, p));
             };
 
-            let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match &spec.kind {
-                    JobKind::Extract { archive, dest, entries, password } => engine.extract(
+            let resultado =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &spec.kind {
+                    JobKind::Extract {
+                        archive,
+                        dest,
+                        entries,
+                        password,
+                    } => engine.extract(
                         archive,
                         dest,
                         entries.as_deref(),
@@ -75,20 +92,21 @@ impl JobQueue {
                         &mut on_progress,
                         &cancel,
                     ),
-                    JobKind::Create { archive, inputs, options } => {
-                        engine.create(archive, inputs, options, &mut on_progress, &cancel)
-                    }
+                    JobKind::Create {
+                        archive,
+                        inputs,
+                        options,
+                    } => engine.create(archive, inputs, options, &mut on_progress, &cancel),
                     JobKind::Test { archive, password } => {
                         engine.test(archive, password.as_deref(), &mut on_progress, &cancel)
                     }
-                }
-            }))
-            .unwrap_or_else(|_| {
-                Err(EngineError::Falha {
-                    exit_code: -1,
-                    stderr: "pânico interno no worker do job".into(),
-                })
-            });
+                }))
+                .unwrap_or_else(|_| {
+                    Err(EngineError::Falha {
+                        exit_code: -1,
+                        stderr: "pânico interno no worker do job".into(),
+                    })
+                });
 
             cancels.lock().unwrap().remove(&id);
             let _ = match resultado {
@@ -111,13 +129,13 @@ impl JobQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_trait::ArchiveEngine;
+    use evezip_engine::{ArchiveEntry, CancelToken, CreateOptions, EngineError};
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::sync::Arc;
     use std::time::Duration;
-    use evezip_engine::{ArchiveEntry, CancelToken, CreateOptions, EngineError};
-    use crate::engine_trait::ArchiveEngine;
 
     /// Engine falso: extract emite 3 progressos; respeita cancelamento; test falha.
     struct EngineFalso {
@@ -129,8 +147,13 @@ mod tests {
             Ok(vec![])
         }
         fn extract(
-            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
-            on_progress: &mut dyn FnMut(u8), cancel: &CancelToken,
+            &self,
+            _: &Path,
+            _: &Path,
+            _: Option<&[String]>,
+            _: Option<&str>,
+            on_progress: &mut dyn FnMut(u8),
+            cancel: &CancelToken,
         ) -> Result<(), EngineError> {
             for p in [10u8, 50, 100] {
                 if self.lento.load(Ordering::SeqCst) {
@@ -144,13 +167,21 @@ mod tests {
             Ok(())
         }
         fn create(
-            &self, _: &Path, _: &[std::path::PathBuf], _: &CreateOptions,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: &[std::path::PathBuf],
+            _: &CreateOptions,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn test(
-            &self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Err(EngineError::ArchiveCorrompido("CRC".into()))
         }
@@ -158,7 +189,12 @@ mod tests {
 
     fn fila(lento: bool) -> (JobQueue, mpsc::Receiver<JobEvent>) {
         let (tx, rx) = mpsc::channel();
-        let q = JobQueue::new(Arc::new(EngineFalso { lento: AtomicBool::new(lento) }), tx);
+        let q = JobQueue::new(
+            Arc::new(EngineFalso {
+                lento: AtomicBool::new(lento),
+            }),
+            tx,
+        );
         (q, rx)
     }
 
@@ -189,10 +225,16 @@ mod tests {
         let (q, rx) = fila(false);
         q.submit(JobSpec {
             descricao: "testar".into(),
-            kind: JobKind::Test { archive: "/x/a.7z".into(), password: None },
+            kind: JobKind::Test {
+                archive: "/x/a.7z".into(),
+                password: None,
+            },
         });
         let evs: Vec<JobEvent> = rx.iter().take(2).collect();
-        assert!(matches!(evs[1], JobEvent::Failed(_, EngineError::ArchiveCorrompido(_))));
+        assert!(matches!(
+            evs[1],
+            JobEvent::Failed(_, EngineError::ArchiveCorrompido(_))
+        ));
     }
 
     #[test]
@@ -201,7 +243,9 @@ mod tests {
         let id = q.submit(spec_extract());
         assert!(matches!(rx.recv().unwrap(), JobEvent::Started(_)));
         q.cancel(id);
-        let ultimo = rx.iter().find(|e| matches!(e, JobEvent::Cancelled(_) | JobEvent::Done(_)));
+        let ultimo = rx
+            .iter()
+            .find(|e| matches!(e, JobEvent::Cancelled(_) | JobEvent::Done(_)));
         assert!(matches!(ultimo, Some(JobEvent::Cancelled(_))));
     }
 
@@ -210,7 +254,11 @@ mod tests {
         let (q, rx) = fila(false);
         q.submit(spec_extract());
         q.submit(spec_extract());
-        let dones = rx.iter().take(10).filter(|e| matches!(e, JobEvent::Done(_))).count();
+        let dones = rx
+            .iter()
+            .take(10)
+            .filter(|e| matches!(e, JobEvent::Done(_)))
+            .count();
         assert_eq!(dones, 2);
     }
 
@@ -222,19 +270,32 @@ mod tests {
             Ok(vec![])
         }
         fn extract(
-            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: &Path,
+            _: Option<&[String]>,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn create(
-            &self, _: &Path, _: &[std::path::PathBuf], _: &CreateOptions,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: &[std::path::PathBuf],
+            _: &CreateOptions,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn test(
-            &self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             panic!("boom no engine");
         }
@@ -246,12 +307,17 @@ mod tests {
         let q = JobQueue::new(Arc::new(EnginePanico), tx);
         let id = q.submit(JobSpec {
             descricao: "testar".into(),
-            kind: JobKind::Test { archive: "/x/a.7z".into(), password: None },
+            kind: JobKind::Test {
+                archive: "/x/a.7z".into(),
+                password: None,
+            },
         });
 
         let evs: Vec<JobEvent> = rx.iter().take(2).collect();
         assert!(matches!(evs[0], JobEvent::Started(i) if i == id));
-        assert!(matches!(&evs[1], JobEvent::Failed(_, EngineError::Falha { exit_code, .. }) if *exit_code == -1));
+        assert!(
+            matches!(&evs[1], JobEvent::Failed(_, EngineError::Falha { exit_code, .. }) if *exit_code == -1)
+        );
 
         // A entrada em `cancels` já foi removida (job terminou); cancelar depois
         // não deve entrar em pânico nem travar.

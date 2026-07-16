@@ -20,17 +20,23 @@ pub struct ArchiveTree {
 
 impl ArchiveTree {
     pub fn build(entries: &[ArchiveEntry]) -> Self {
-        let mut root = Node { is_dir: true, ..Node::default() };
+        let mut root = Node {
+            is_dir: true,
+            ..Node::default()
+        };
         for e in entries {
             let caminho = e.path.replace('\\', "/");
             let partes: Vec<&str> = caminho.split('/').filter(|p| !p.is_empty()).collect();
             let mut atual = &mut root;
             for (i, parte) in partes.iter().enumerate() {
                 let ultimo = i == partes.len() - 1;
-                let filho = atual.children.entry((*parte).to_string()).or_insert_with(|| Node {
-                    is_dir: true, // implícito até provar o contrário
-                    ..Node::default()
-                });
+                let filho = atual
+                    .children
+                    .entry((*parte).to_string())
+                    .or_insert_with(|| Node {
+                        is_dir: true, // implícito até provar o contrário
+                        ..Node::default()
+                    });
                 if ultimo {
                     // Um nó que já tem filhos (ex.: "a/b.txt" processado antes de "a")
                     // é sempre diretório, mesmo que a entrada explícita diga is_dir=false.
@@ -144,7 +150,10 @@ mod tests {
             let raiz = t.list_dir("").unwrap();
             assert_eq!(raiz.len(), 1);
             assert_eq!(raiz[0].name, "a");
-            assert!(raiz[0].is_dir, "nó com filhos deve ser tratado como diretório");
+            assert!(
+                raiz[0].is_dir,
+                "nó com filhos deve ser tratado como diretório"
+            );
             let dentro = t.list_dir("a").unwrap();
             assert_eq!(dentro.len(), 1);
             assert_eq!(dentro[0].name, "b.txt");

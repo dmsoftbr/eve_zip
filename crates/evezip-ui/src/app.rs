@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, StandardListViewItem, VecModel, Weak};
 
-use evezip_core::{ArchiveEngine, Browser, JobEvent, JobId, JobKind, JobQueue, JobSpec, Location, Row};
+use evezip_core::{
+    ArchiveEngine, Browser, JobEvent, JobId, JobKind, JobQueue, JobSpec, Location, Row,
+};
 
 use crate::format::tamanho_humano;
 
@@ -42,15 +44,28 @@ pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<ModelRc<StandardListViewItem>
     let linhas: Vec<ModelRc<StandardListViewItem>> = rows
         .iter()
         .map(|r| {
-            let nome = if r.is_dir { format!("📁 {}", r.name) } else { format!("📄 {}", r.name) };
+            let nome = if r.is_dir {
+                format!("📁 {}", r.name)
+            } else {
+                format!("📄 {}", r.name)
+            };
             let celulas: Vec<StandardListViewItem> = vec![
                 StandardListViewItem::from(nome.as_str()),
                 StandardListViewItem::from(
-                    if r.is_dir { "—".to_string() } else { tamanho_humano(r.size) }.as_str(),
+                    if r.is_dir {
+                        "—".to_string()
+                    } else {
+                        tamanho_humano(r.size)
+                    }
+                    .as_str(),
                 ),
                 StandardListViewItem::from(
-                    if r.packed_size == 0 { "".to_string() } else { tamanho_humano(r.packed_size) }
-                        .as_str(),
+                    if r.packed_size == 0 {
+                        "".to_string()
+                    } else {
+                        tamanho_humano(r.packed_size)
+                    }
+                    .as_str(),
                 ),
                 StandardListViewItem::from(r.modified.as_str()),
             ];
@@ -61,7 +76,10 @@ pub fn linhas_para_modelo(rows: &[Row]) -> ModelRc<ModelRc<StandardListViewItem>
 }
 
 impl App {
-    pub fn new(engine: Arc<dyn ArchiveEngine>, inicial: Location) -> Result<App, slint::PlatformError> {
+    pub fn new(
+        engine: Arc<dyn ArchiveEngine>,
+        inicial: Location,
+    ) -> Result<App, slint::PlatformError> {
         let window = AppWindow::new()?;
         let state = Rc::new(std::cell::RefCell::new(State {
             location: inicial,
@@ -216,7 +234,11 @@ impl App {
     /// depois de `App::new`, uma vez que a fila (e a ponte de eventos) exista.
     /// Substitui os `on_extrair`/`on_testar` vazios instalados em
     /// `instalar_callbacks`.
-    pub fn instalar_fila(&self, queue: Arc<JobQueue>, descricoes: Arc<Mutex<HashMap<JobId, String>>>) {
+    pub fn instalar_fila(
+        &self,
+        queue: Arc<JobQueue>,
+        descricoes: Arc<Mutex<HashMap<JobId, String>>>,
+    ) {
         let state = Rc::clone(&self.state);
         let weak = self.window.as_weak();
         let q = Arc::clone(&queue);
@@ -260,7 +282,10 @@ impl App {
                     }
                 }
             };
-            let Some(dest) = rfd::FileDialog::new().set_title("Extrair para...").pick_folder() else {
+            let Some(dest) = rfd::FileDialog::new()
+                .set_title("Extrair para...")
+                .pick_folder()
+            else {
                 return;
             };
             submeter(
@@ -269,9 +294,17 @@ impl App {
                 JobSpec {
                     descricao: format!(
                         "Extrair {}",
-                        archive.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                        archive
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
                     ),
-                    kind: JobKind::Extract { archive, dest, entries: entrada, password: senha },
+                    kind: JobKind::Extract {
+                        archive,
+                        dest,
+                        entries: entrada,
+                        password: senha,
+                    },
                 },
             );
         });
@@ -287,7 +320,10 @@ impl App {
                     &descricoes2,
                     JobSpec {
                         descricao: format!("Testar {}", archive.display()),
-                        kind: JobKind::Test { archive: archive.clone(), password: s.senha_do_archive.clone() },
+                        kind: JobKind::Test {
+                            archive: archive.clone(),
+                            password: s.senha_do_archive.clone(),
+                        },
                     },
                 );
             }
@@ -324,9 +360,10 @@ impl App {
             let descricoes = Arc::clone(&descricoes3);
             let dir_atual = match &state3.borrow().location {
                 Location::Disk(d) => d.clone(),
-                Location::Archive { archive, .. } => {
-                    archive.parent().unwrap_or(std::path::Path::new("/")).to_path_buf()
-                }
+                Location::Archive { archive, .. } => archive
+                    .parent()
+                    .unwrap_or(std::path::Path::new("/"))
+                    .to_path_buf(),
             };
 
             dlg.on_cancelar({
@@ -366,7 +403,11 @@ impl App {
                 // reforçado aqui em defesa de profundidade (o campo poderia
                 // reter texto de uma seleção anterior de formato).
                 let eh_tar = matches!(fmt, Format::Tar | Format::TarGz);
-                let password = if eh_tar { None } else { (!senha.is_empty()).then(|| senha.to_string()) };
+                let password = if eh_tar {
+                    None
+                } else {
+                    (!senha.is_empty()).then(|| senha.to_string())
+                };
                 let encrypt_names = criptografar_nomes && fmt == Format::SevenZ;
                 submeter(
                     &q,
@@ -374,12 +415,20 @@ impl App {
                     JobSpec {
                         descricao: format!(
                             "Criar {}",
-                            destino.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                            destino
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default()
                         ),
                         kind: JobKind::Create {
                             archive: destino,
                             inputs: inputs.clone(),
-                            options: CreateOptions { format: fmt, level: nivel as u8, password, encrypt_names },
+                            options: CreateOptions {
+                                format: fmt,
+                                level: nivel as u8,
+                                password,
+                                encrypt_names,
+                            },
                         },
                     },
                 );
@@ -535,7 +584,12 @@ pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>,
 
     let (id, mudanca): (JobId, Mudanca) = match ev {
         JobEvent::Started(id) => {
-            let descricao = descricoes.lock().unwrap().get(&id).cloned().unwrap_or_default();
+            let descricao = descricoes
+                .lock()
+                .unwrap()
+                .get(&id)
+                .cloned()
+                .unwrap_or_default();
             jobs.push(JobRow {
                 id: id as i32,
                 descricao: descricao.into(),
@@ -579,10 +633,10 @@ mod jobs_tests {
     //! dependem da janela Slint (só `aplicar_evento` precisa de `AppWindow`,
     //! que exige uma janela real — fora do escopo automatizável aqui).
     use super::*;
-    use std::path::PathBuf;
-    use std::sync::mpsc;
     use evezip_engine::{ArchiveEntry, CancelToken, CreateOptions, EngineError};
     use std::path::Path;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
 
     struct EngineFalso;
     impl ArchiveEngine for EngineFalso {
@@ -590,19 +644,32 @@ mod jobs_tests {
             Ok(vec![])
         }
         fn extract(
-            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: &Path,
+            _: Option<&[String]>,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn create(
-            &self, _: &Path, _: &[PathBuf], _: &CreateOptions,
-            _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: &[PathBuf],
+            _: &CreateOptions,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn test(
-            &self, _: &Path, _: Option<&str>, _: &mut dyn FnMut(u8), _: &CancelToken,
+            &self,
+            _: &Path,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
@@ -618,13 +685,19 @@ mod jobs_tests {
             &descricoes,
             JobSpec {
                 descricao: "Testar a.7z".into(),
-                kind: JobKind::Test { archive: PathBuf::from("/x/a.7z"), password: None },
+                kind: JobKind::Test {
+                    archive: PathBuf::from("/x/a.7z"),
+                    password: None,
+                },
             },
         );
 
         // `submeter` insere no mapa antes de retornar — não depende de nenhum
         // evento chegar para isso ser verdade.
-        assert_eq!(descricoes.lock().unwrap().get(&id).cloned(), Some("Testar a.7z".to_string()));
+        assert_eq!(
+            descricoes.lock().unwrap().get(&id).cloned(),
+            Some("Testar a.7z".to_string())
+        );
 
         // Consome os eventos (Started + terminal) para não vazar a thread do
         // worker (join implícito via drop do sender ao sair de escopo já é

@@ -44,7 +44,10 @@ impl Config {
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(p, toml::to_string_pretty(self).expect("config serializável"))
+        std::fs::write(
+            p,
+            toml::to_string_pretty(self).expect("config serializável"),
+        )
     }
 }
 

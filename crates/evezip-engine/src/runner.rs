@@ -182,7 +182,10 @@ mod tests {
             &CancelToken::new(),
         )
         .unwrap_err();
-        assert!(matches!(err, EngineError::Falha { .. } | EngineError::ArchiveCorrompido(_)));
+        assert!(matches!(
+            err,
+            EngineError::Falha { .. } | EngineError::ArchiveCorrompido(_)
+        ));
     }
 
     #[test]
@@ -227,7 +230,9 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
         cancel.cancel();
 
-        let resultado = handle.join().expect("thread do run_7zz não deve entrar em pânico");
+        let resultado = handle
+            .join()
+            .expect("thread do run_7zz não deve entrar em pânico");
         let decorrido = inicio.elapsed();
 
         assert!(

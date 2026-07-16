@@ -43,8 +43,20 @@ fn navega_para_dentro_do_archive_e_volta_ao_disco() {
     let d = sandbox("ok");
     let eng = Engine::locate().unwrap();
     let arq = d.join("teste.7z");
-    let opts = CreateOptions { format: Format::SevenZ, level: 1, password: None, encrypt_names: false };
-    eng.create(&arq, &[d.join("conteudo")], &opts, &mut |_| {}, &CancelToken::new()).unwrap();
+    let opts = CreateOptions {
+        format: Format::SevenZ,
+        level: 1,
+        password: None,
+        encrypt_names: false,
+    };
+    eng.create(
+        &arq,
+        &[d.join("conteudo")],
+        &opts,
+        &mut |_| {},
+        &CancelToken::new(),
+    )
+    .unwrap();
 
     let mut browser = Browser::new(Arc::new(eng));
     let no_disco = Location::Disk(d.clone());
@@ -104,5 +116,8 @@ fn archive_corrompido_nao_navega() {
 
     // Endurecimento do Step 2: como `list` falhou, a location NÃO deve mudar.
     let loc_final = tentar_navegar(&mut browser, &no_disco, alvo, None);
-    assert_eq!(loc_final, no_disco, "não deveria navegar para o archive corrompido");
+    assert_eq!(
+        loc_final, no_disco,
+        "não deveria navegar para o archive corrompido"
+    );
 }

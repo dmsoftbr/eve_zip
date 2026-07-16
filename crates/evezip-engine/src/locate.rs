@@ -11,7 +11,11 @@ pub fn find_7zz() -> Result<PathBuf, EngineError> {
         }
     }
 
-    let names: &[&str] = if cfg!(windows) { &["7z.exe", "7zz.exe"] } else { &["7zz"] };
+    let names: &[&str] = if cfg!(windows) {
+        &["7z.exe", "7zz.exe"]
+    } else {
+        &["7zz"]
+    };
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {

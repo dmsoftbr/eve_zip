@@ -25,7 +25,10 @@ const EXTENSOES: &[&str] = &["zip", "7z", "rar", "tar", "gz", "tgz"];
 
 impl Browser {
     pub fn new(engine: Arc<dyn ArchiveEngine>) -> Self {
-        Browser { engine, cache: None }
+        Browser {
+            engine,
+            cache: None,
+        }
     }
 
     /// Clona o `Arc` do engine subjacente — usado pelo preview (Task 14) para
@@ -39,7 +42,11 @@ impl Browser {
         EXTENSOES.iter().any(|e| lower.ends_with(&format!(".{e}")))
     }
 
-    pub fn list(&mut self, loc: &Location, password: Option<&str>) -> Result<Vec<Row>, EngineError> {
+    pub fn list(
+        &mut self,
+        loc: &Location,
+        password: Option<&str>,
+    ) -> Result<Vec<Row>, EngineError> {
         match loc {
             Location::Disk(dir) => {
                 let mut rows = Vec::new();
@@ -62,15 +69,15 @@ impl Browser {
                 Ok(rows)
             }
             Location::Archive { archive, inner } => {
-                let precisa_carregar =
-                    !matches!(&self.cache, Some((p, _)) if p == archive);
+                let precisa_carregar = !matches!(&self.cache, Some((p, _)) if p == archive);
                 if precisa_carregar {
                     let entradas = self.engine.list(archive, password)?;
                     self.cache = Some((archive.clone(), ArchiveTree::build(&entradas)));
                 }
                 let (_, tree) = self.cache.as_ref().unwrap();
-                tree.list_dir(inner).ok_or_else(|| {
-                    EngineError::Falha { exit_code: -1, stderr: format!("caminho não existe no archive: {inner}") }
+                tree.list_dir(inner).ok_or_else(|| EngineError::Falha {
+                    exit_code: -1,
+                    stderr: format!("caminho não existe no archive: {inner}"),
                 })
             }
         }
@@ -83,15 +90,25 @@ impl Browser {
                 if is_dir {
                     Location::Disk(alvo)
                 } else if Self::is_archive_file(name) {
-                    Location::Archive { archive: alvo, inner: String::new() }
+                    Location::Archive {
+                        archive: alvo,
+                        inner: String::new(),
+                    }
                 } else {
                     loc.clone()
                 }
             }
             Location::Archive { archive, inner } => {
                 if is_dir {
-                    let novo = if inner.is_empty() { name.to_string() } else { format!("{inner}/{name}") };
-                    Location::Archive { archive: archive.clone(), inner: novo }
+                    let novo = if inner.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{inner}/{name}")
+                    };
+                    Location::Archive {
+                        archive: archive.clone(),
+                        inner: novo,
+                    }
                 } else {
                     loc.clone() // arquivo dentro de archive: preview (Task 14), não navegação
                 }
@@ -124,20 +141,32 @@ mod tests {
             }])
         }
         fn extract(
-            &self, _: &Path, _: &Path, _: Option<&[String]>, _: Option<&str>,
-            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+            &self,
+            _: &Path,
+            _: &Path,
+            _: Option<&[String]>,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &evezip_engine::CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn create(
-            &self, _: &Path, _: &[std::path::PathBuf], _: &evezip_engine::CreateOptions,
-            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+            &self,
+            _: &Path,
+            _: &[std::path::PathBuf],
+            _: &evezip_engine::CreateOptions,
+            _: &mut dyn FnMut(u8),
+            _: &evezip_engine::CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
         fn test(
-            &self, _: &Path, _: Option<&str>,
-            _: &mut dyn FnMut(u8), _: &evezip_engine::CancelToken,
+            &self,
+            _: &Path,
+            _: Option<&str>,
+            _: &mut dyn FnMut(u8),
+            _: &evezip_engine::CancelToken,
         ) -> Result<(), EngineError> {
             Ok(())
         }
@@ -145,12 +174,20 @@ mod tests {
 
     #[test]
     fn lista_archive_com_cache() {
-        let falso = Arc::new(EngineFalso { chamadas: Mutex::new(0) });
+        let falso = Arc::new(EngineFalso {
+            chamadas: Mutex::new(0),
+        });
         let mut b = Browser::new(falso.clone());
-        let loc = Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: String::new() };
+        let loc = Location::Archive {
+            archive: PathBuf::from("/x/a.7z"),
+            inner: String::new(),
+        };
         let raiz = b.list(&loc, None).unwrap();
         assert_eq!(raiz[0].name, "src");
-        let dentro = Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: "src".into() };
+        let dentro = Location::Archive {
+            archive: PathBuf::from("/x/a.7z"),
+            inner: "src".into(),
+        };
         let sub = b.list(&dentro, None).unwrap();
         assert_eq!(sub[0].name, "main.rs");
         assert_eq!(*falso.chamadas.lock().unwrap(), 1); // uma listagem só, resto do cache
@@ -165,13 +202,21 @@ mod tests {
 
     #[test]
     fn enter_em_dir_de_disco_e_em_archive() {
-        let falso = Arc::new(EngineFalso { chamadas: Mutex::new(0) });
+        let falso = Arc::new(EngineFalso {
+            chamadas: Mutex::new(0),
+        });
         let b = Browser::new(falso);
         let disco = Location::Disk(PathBuf::from("/x"));
-        assert_eq!(b.enter(&disco, "sub", true), Location::Disk(PathBuf::from("/x/sub")));
+        assert_eq!(
+            b.enter(&disco, "sub", true),
+            Location::Disk(PathBuf::from("/x/sub"))
+        );
         assert_eq!(
             b.enter(&disco, "a.7z", false),
-            Location::Archive { archive: PathBuf::from("/x/a.7z"), inner: String::new() }
+            Location::Archive {
+                archive: PathBuf::from("/x/a.7z"),
+                inner: String::new()
+            }
         );
     }
 }

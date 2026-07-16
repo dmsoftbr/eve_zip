@@ -63,9 +63,10 @@ fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Opt
 /// Abre a janela principal, opcionalmente já posicionada num archive ou pasta.
 fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
     let inicial = match caminho {
-        Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => {
-            Location::Archive { archive: p, inner: String::new() }
-        }
+        Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => Location::Archive {
+            archive: p,
+            inner: String::new(),
+        },
         Some(p) => Location::Disk(p),
         None => Location::Disk(dirs_home().unwrap_or_else(|| PathBuf::from("/"))),
     };
