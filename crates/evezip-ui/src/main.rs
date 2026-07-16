@@ -82,18 +82,30 @@ fn abrir_ui(engine: Arc<dyn ArchiveEngine>, caminho: Option<PathBuf>) {
     // (`submeter`) e a thread-ponte (`aplicar_evento`).
     let descricoes: Arc<Mutex<HashMap<evezip_core::JobId, String>>> = Arc::default();
 
+    // Mapa id → JobKind: guarda o "molde" de cada job para poder reenviá-lo com
+    // a senha digitada quando ele falha por senha (SenhaNecessaria/Incorreta).
+    // JobKind é `Send` (só caminhos e opções), então acompanha `descricoes`
+    // pela thread-ponte e é limpo em `aplicar_evento` nos eventos terminais.
+    let kinds: Arc<Mutex<HashMap<evezip_core::JobId, evezip_core::JobKind>>> = Arc::default();
+
     // Fila de jobs + thread-ponte: eventos do worker (thread separada) são
     // encaminhados para o thread da UI via `upgrade_in_event_loop`.
     let (tx, rx) = mpsc::channel::<evezip_core::JobEvent>();
     let queue = Arc::new(JobQueue::new(engine, tx));
-    app.instalar_fila(queue, Arc::clone(&descricoes));
+    app.instalar_fila(
+        Arc::clone(&queue),
+        Arc::clone(&descricoes),
+        Arc::clone(&kinds),
+    );
 
     let weak = app.window_weak();
     std::thread::spawn(move || {
         for ev in rx {
             let weak = weak.clone();
             let descricoes = Arc::clone(&descricoes);
-            let _ = weak.upgrade_in_event_loop(move |w| app::aplicar_evento(&w, &descricoes, ev));
+            let kinds = Arc::clone(&kinds);
+            let _ = weak
+                .upgrade_in_event_loop(move |w| app::aplicar_evento(&w, &descricoes, &kinds, ev));
         }
     });
 

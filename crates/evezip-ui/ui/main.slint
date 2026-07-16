@@ -19,6 +19,10 @@ export component AppWindow inherits Window {
     callback adicionar();
     callback testar();
     callback cancelar-job(int);
+    // Disparado pelo Rust quando um job de extração/teste falha por senha:
+    // (id-do-job, senha-estava-incorreta). O handler abre o PasswordDialog e
+    // reenvia o job com a senha digitada.
+    callback pedir-senha-job(int, bool);
 
     out property <int> linha-atual: tabela.current-row;
 

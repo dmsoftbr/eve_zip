@@ -238,11 +238,13 @@ impl App {
         &self,
         queue: Arc<JobQueue>,
         descricoes: Arc<Mutex<HashMap<JobId, String>>>,
+        kinds: Arc<Mutex<HashMap<JobId, JobKind>>>,
     ) {
         let state = Rc::clone(&self.state);
         let weak = self.window.as_weak();
         let q = Arc::clone(&queue);
         let descricoes1 = Arc::clone(&descricoes);
+        let kinds1 = Arc::clone(&kinds);
 
         self.window.on_extrair(move || {
             let (archive, senha, entrada) = {
@@ -291,6 +293,7 @@ impl App {
             submeter(
                 &q,
                 &descricoes1,
+                &kinds1,
                 JobSpec {
                     descricao: format!(
                         "Extrair {}",
@@ -312,12 +315,14 @@ impl App {
         let q = Arc::clone(&queue);
         let state2 = Rc::clone(&self.state);
         let descricoes2 = Arc::clone(&descricoes);
+        let kinds2 = Arc::clone(&kinds);
         self.window.on_testar(move || {
             let s = state2.borrow();
             if let Location::Archive { archive, .. } = &s.location {
                 submeter(
                     &q,
                     &descricoes2,
+                    &kinds2,
                     JobSpec {
                         descricao: format!("Testar {}", archive.display()),
                         kind: JobKind::Test {
@@ -331,6 +336,7 @@ impl App {
 
         let q = Arc::clone(&queue);
         let descricoes3 = Arc::clone(&descricoes);
+        let kinds3 = Arc::clone(&kinds);
         let state3 = Rc::clone(&self.state);
         let weak4 = self.window.as_weak();
         self.window.on_adicionar(move || {
@@ -358,6 +364,7 @@ impl App {
             let dlg_weak = dlg.as_weak();
             let q = Arc::clone(&q);
             let descricoes = Arc::clone(&descricoes3);
+            let kinds = Arc::clone(&kinds3);
             let dir_atual = match &state3.borrow().location {
                 Location::Disk(d) => d.clone(),
                 Location::Archive { archive, .. } => archive
@@ -412,6 +419,7 @@ impl App {
                 submeter(
                     &q,
                     &descricoes,
+                    &kinds,
                     JobSpec {
                         descricao: format!(
                             "Criar {}",
@@ -438,6 +446,23 @@ impl App {
                 }
             });
             let _ = dlg.show();
+        });
+
+        let q_senha = Arc::clone(&queue);
+        let descricoes_senha = Arc::clone(&descricoes);
+        let kinds_senha = Arc::clone(&kinds);
+        let state_senha = Rc::clone(&self.state);
+        let weak_senha = self.window.as_weak();
+        self.window.on_pedir_senha_job(move |id, incorreta| {
+            pedir_senha_e_reenviar_job(
+                &q_senha,
+                &descricoes_senha,
+                &kinds_senha,
+                &state_senha,
+                &weak_senha,
+                id as JobId,
+                incorreta,
+            );
         });
 
         let q = Arc::clone(&queue);
@@ -539,6 +564,112 @@ fn pedir_senha_e_navegar(
     let _ = dlg.show();
 }
 
+fn nome_de(p: &std::path::Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Abre o `PasswordDialog` para um job de extração/teste que falhou por senha
+/// (`SenhaNecessaria`/`SenhaIncorreta`) e, na confirmação, reenvia o MESMO job
+/// com a senha digitada. Guarda a senha em `state.senha_do_archive` para
+/// operações seguintes. O reprompt é natural: se a senha estiver errada, o novo
+/// job falha de novo e `aplicar_evento` dispara este fluxo outra vez (agora com
+/// `incorreta = true`). Só é chamado para `Extract`/`Test` (garantido em
+/// `aplicar_evento`).
+fn pedir_senha_e_reenviar_job(
+    q: &Arc<JobQueue>,
+    descricoes: &Arc<Mutex<HashMap<JobId, String>>>,
+    kinds: &Arc<Mutex<HashMap<JobId, JobKind>>>,
+    state: &Rc<std::cell::RefCell<State>>,
+    weak: &Weak<AppWindow>,
+    id: JobId,
+    incorreta: bool,
+) {
+    // Guarda contra diálogos empilhados: se já há um diálogo aberto, ignora.
+    if state.borrow().dialogo_aberto {
+        return;
+    }
+    // Recupera o molde do job falho e o remove do mapa (o reenvio cria um id
+    // novo, que `submeter` registra de novo).
+    let Some(kind) = kinds.lock().unwrap().remove(&id) else {
+        return;
+    };
+
+    let dlg = PasswordDialog::new().expect("dialog");
+    dlg.set_mensagem(if incorreta {
+        "Senha incorreta, tente novamente.".into()
+    } else {
+        "Este archive exige senha.".into()
+    });
+    state.borrow_mut().dialogo_aberto = true;
+    let dlg_weak = dlg.as_weak();
+
+    dlg.on_cancelar({
+        let w = dlg_weak.clone();
+        let state = Rc::clone(state);
+        move || {
+            state.borrow_mut().dialogo_aberto = false;
+            if let Some(d) = w.upgrade() {
+                let _ = d.hide();
+            }
+        }
+    });
+
+    let q = Arc::clone(q);
+    let descricoes = Arc::clone(descricoes);
+    let kinds = Arc::clone(kinds);
+    let state = Rc::clone(state);
+    let _ = weak; // reservado para futuros usos (ex.: status na janela).
+    dlg.on_confirmar(move |senha| {
+        let senha = senha.to_string();
+        // Injeta a senha no molde do job e monta uma descrição fresca (a antiga
+        // já foi removida em `aplicar_evento`).
+        let (novo_kind, descricao) = match &kind {
+            JobKind::Extract {
+                archive,
+                dest,
+                entries,
+                ..
+            } => (
+                JobKind::Extract {
+                    archive: archive.clone(),
+                    dest: dest.clone(),
+                    entries: entries.clone(),
+                    password: Some(senha.clone()),
+                },
+                format!("Extrair {}", nome_de(archive)),
+            ),
+            JobKind::Test { archive, .. } => (
+                JobKind::Test {
+                    archive: archive.clone(),
+                    password: Some(senha.clone()),
+                },
+                format!("Testar {}", nome_de(archive)),
+            ),
+            // Create nunca chega aqui (aplicar_evento só dispara p/ Extract/Test).
+            outro => (outro.clone(), "Reenviar".to_string()),
+        };
+        // Guarda a senha para operações seguintes (otimista; se errada, o
+        // reprompt a substitui na próxima falha).
+        state.borrow_mut().senha_do_archive = Some(senha);
+        submeter(
+            &q,
+            &descricoes,
+            &kinds,
+            JobSpec {
+                descricao,
+                kind: novo_kind,
+            },
+        );
+        state.borrow_mut().dialogo_aberto = false;
+        if let Some(d) = dlg_weak.upgrade() {
+            let _ = d.hide();
+        }
+    });
+    let _ = dlg.show();
+}
+
 /// Recarga usada de dentro dos callbacks (sem &self).
 pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
     let mut s = state.borrow_mut();
@@ -566,21 +697,39 @@ pub fn recarregar_janela(w: &AppWindow, state: &Rc<std::cell::RefCell<State>>) {
 /// `Weak::upgrade_in_event_loop` (ver `aplicar_evento`/`main.rs`). Sem essa
 /// garantia (ex.: se `submeter` fosse chamada de outra thread), haveria uma
 /// corrida entre o insert e o `Started` chegando primeiro.
-pub fn submeter(q: &JobQueue, descricoes: &Mutex<HashMap<JobId, String>>, spec: JobSpec) -> JobId {
+pub fn submeter(
+    q: &JobQueue,
+    descricoes: &Mutex<HashMap<JobId, String>>,
+    kinds: &Mutex<HashMap<JobId, JobKind>>,
+    spec: JobSpec,
+) -> JobId {
     let descricao = spec.descricao.clone();
+    let kind = spec.kind.clone();
     let id = q.submit(spec);
     descricoes.lock().unwrap().insert(id, descricao);
+    kinds.lock().unwrap().insert(id, kind);
     id
 }
 
 /// Aplica um `JobEvent` ao modelo `jobs` da janela. Roda no thread da UI
 /// (agendado via `Weak::upgrade_in_event_loop` a partir da thread-ponte em
 /// `main.rs`).
-pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>, ev: JobEvent) {
+pub fn aplicar_evento(
+    w: &AppWindow,
+    descricoes: &Mutex<HashMap<JobId, String>>,
+    kinds: &Mutex<HashMap<JobId, JobKind>>,
+    ev: JobEvent,
+) {
     type Mudanca = Box<dyn Fn(&mut JobRow)>;
 
     let modelo = w.get_jobs();
     let mut jobs: Vec<JobRow> = modelo.iter().collect();
+
+    // Se um job de extração/teste falhou por senha, dispara o fluxo de reprompt
+    // depois de atualizar o modelo (id-do-job, senha-estava-incorreta). Fica
+    // fora de qualquer lock de mutex para não colidir com o handler que roda
+    // sincronamente ao invocar o callback.
+    let mut precisa_senha: Option<(i32, bool)> = None;
 
     let (id, mudanca): (JobId, Mudanca) = match ev {
         JobEvent::Started(id) => {
@@ -601,6 +750,7 @@ pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>,
         JobEvent::Progress(id, p) => (id, Box::new(move |j: &mut JobRow| j.progresso = p as i32)),
         JobEvent::Done(id) => {
             descricoes.lock().unwrap().remove(&id);
+            kinds.lock().unwrap().remove(&id);
             (
                 id,
                 Box::new(|j: &mut JobRow| {
@@ -611,11 +761,34 @@ pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>,
         }
         JobEvent::Failed(id, e) => {
             descricoes.lock().unwrap().remove(&id);
-            let msg = slint::SharedString::from(format!("erro: {e}"));
-            (id, Box::new(move |j: &mut JobRow| j.estado = msg.clone()))
+            // Falha por senha em extração/teste: mantém o kind no mapa para o
+            // handler reenviar o job com a senha digitada. Outros erros (ou
+            // kinds que não sejam Extract/Test) limpam o mapa e só mostram o erro.
+            let incorreta = matches!(e, evezip_engine::EngineError::SenhaIncorreta);
+            let por_senha = matches!(
+                e,
+                evezip_engine::EngineError::SenhaNecessaria
+                    | evezip_engine::EngineError::SenhaIncorreta
+            );
+            let kind_reenviavel = matches!(
+                kinds.lock().unwrap().get(&id),
+                Some(JobKind::Extract { .. } | JobKind::Test { .. })
+            );
+            if por_senha && kind_reenviavel {
+                precisa_senha = Some((id as i32, incorreta));
+                (
+                    id,
+                    Box::new(|j: &mut JobRow| j.estado = "aguardando senha".into()),
+                )
+            } else {
+                kinds.lock().unwrap().remove(&id);
+                let msg = slint::SharedString::from(format!("erro: {e}"));
+                (id, Box::new(move |j: &mut JobRow| j.estado = msg.clone()))
+            }
         }
         JobEvent::Cancelled(id) => {
             descricoes.lock().unwrap().remove(&id);
+            kinds.lock().unwrap().remove(&id);
             (id, Box::new(|j: &mut JobRow| j.estado = "cancelado".into()))
         }
     };
@@ -625,6 +798,12 @@ pub fn aplicar_evento(w: &AppWindow, descricoes: &Mutex<HashMap<JobId, String>>,
         }
     }
     w.set_jobs(ModelRc::new(VecModel::from(jobs)));
+
+    // Nenhum lock está retido aqui: seguro invocar o callback (que roda
+    // sincronamente no thread da UI e pode abrir o PasswordDialog).
+    if let Some((id, incorreta)) = precisa_senha {
+        w.invoke_pedir_senha_job(id, incorreta);
+    }
 }
 
 #[cfg(test)]
@@ -680,9 +859,11 @@ mod jobs_tests {
         let (tx, rx) = mpsc::channel();
         let q = JobQueue::new(Arc::new(EngineFalso), tx);
         let descricoes: Mutex<HashMap<JobId, String>> = Mutex::new(HashMap::new());
+        let kinds: Mutex<HashMap<JobId, JobKind>> = Mutex::new(HashMap::new());
         let id = submeter(
             &q,
             &descricoes,
+            &kinds,
             JobSpec {
                 descricao: "Testar a.7z".into(),
                 kind: JobKind::Test {
@@ -692,11 +873,15 @@ mod jobs_tests {
             },
         );
 
-        // `submeter` insere no mapa antes de retornar — não depende de nenhum
-        // evento chegar para isso ser verdade.
+        // `submeter` insere nos dois mapas antes de retornar — não depende de
+        // nenhum evento chegar para isso ser verdade.
         assert_eq!(
             descricoes.lock().unwrap().get(&id).cloned(),
             Some("Testar a.7z".to_string())
+        );
+        assert!(
+            matches!(kinds.lock().unwrap().get(&id), Some(JobKind::Test { .. })),
+            "kind do job deveria estar registrado"
         );
 
         // Consome os eventos (Started + terminal) para não vazar a thread do
