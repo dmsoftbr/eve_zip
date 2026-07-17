@@ -1,0 +1,37 @@
+name: CI Linux (manual)
+
+# NÃO roda automático — só sob demanda (aba Actions → "Run workflow", ou
+# `gh workflow run ci-linux.yml`). Assim o Linux tem CI de verdade sem gastar
+# minutos a cada push. Para o dia a dia, use `scripts/verify-linux.sh` (Docker).
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependências de UI (Slint + rfd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxkbcommon-dev libfontconfig-dev \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libwayland-dev
+
+      - name: Vendorizar 7zz
+        run: ./scripts/fetch-7zz.sh
+
+      - name: Formatação e lints
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Testes
+        run: cargo test --workspace

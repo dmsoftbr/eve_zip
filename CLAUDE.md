@@ -44,6 +44,15 @@ Bypass de emergência (por sua conta): `git push --no-verify`.
 
 ## CI
 
-`.github/workflows/ci.yml` roda **só no macOS** (alvo suportado), em PRs e push
-na `main`, com `concurrency` (um push novo cancela o run anterior). Linux/Windows
-saíram da matriz porque o app ainda não tem suporte de 1ª classe lá.
+`.github/workflows/ci.yml` roda **só no macOS** (auto, em PRs e push na `main`,
+com `concurrency` — um push novo cancela o run anterior).
+
+Linux é suportado e testado, mas **não roda no CI automaticamente** (economia de
+minutos):
+- Local, sob demanda: `bash scripts/verify-linux.sh` (roda fmt/clippy/test num
+  container Docker com as deps do Slint/rfd). Precisa de Docker (ex.: OrbStack).
+- No GitHub, sob demanda: workflow manual `.github/workflows/ci-linux.yml`
+  (aba Actions → Run workflow, ou `gh workflow run ci-linux.yml`).
+
+Windows tem os `.reg` de associação e menu de contexto em `packaging/windows/`,
+mas ainda não tem build/CI verificado (precisa de máquina/CI Windows).
