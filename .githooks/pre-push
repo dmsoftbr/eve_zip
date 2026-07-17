@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Gate de pre-push: roda os mesmos checks do CI localmente antes de enviar.
+# Evita gastar minutos de GitHub Actions com push quebrado.
+# Bypass de emergência: git push --no-verify
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+exec bash "${root}/scripts/verify.sh"

@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Comprimir com EveZip
+Comment=Compactar a seleção com o EveZip
+Exec=evezip a %F
+Icon-Name=evezip
+Selection=notnone
+Extensions=any;

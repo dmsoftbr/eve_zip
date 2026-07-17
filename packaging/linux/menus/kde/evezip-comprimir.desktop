@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+MimeType=all/allfiles;inode/directory;
+Name=Comprimir com EveZip
+Actions=comprimir;
+X-KDE-Priority=TopLevel
+Icon=evezip
+
+[Desktop Action comprimir]
+Name=Comprimir com EveZip
+Icon=evezip
+Exec=evezip a %F

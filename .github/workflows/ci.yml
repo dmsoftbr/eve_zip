@@ -1,0 +1,36 @@
+name: CI
+
+# Roda só em PRs e em push na main. Não roda a cada push em branches de
+# feature (o PR já cobre isso) — evita disparar dois runs por push.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Um push novo cancela o run anterior do mesmo ref (economiza minutos).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # EveZip é um app focado em macOS (Apple Events, bundle .app, /Applications).
+    # A UI (rfd/Slint) e o motor 7zz têm particularidades por plataforma; o
+    # alvo suportado e testado é o macOS. Linux/Windows podem voltar à matriz
+    # quando/se houver suporte de 1ª classe.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Vendorizar 7zz
+        run: ./scripts/fetch-7zz.sh
+
+      - name: Formatação e lints
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Testes
+        run: cargo test --workspace

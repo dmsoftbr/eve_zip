@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Extrair com EveZip
+Comment=Extrair archive com o EveZip
+Exec=evezip e %F
+Icon-Name=evezip
+Selection=notnone
+Extensions=zip;7z;rar;tar;gz;tgz;

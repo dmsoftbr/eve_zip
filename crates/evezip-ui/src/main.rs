@@ -1,0 +1,224 @@
+mod app;
+mod cli;
+mod format;
+#[cfg(target_os = "macos")]
+mod macos_open;
+mod preview;
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
+use std::sync::{mpsc, Arc, Mutex};
+
+use evezip_core::{ArchiveEngine, Browser, Config, JobQueue, Location};
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let comando = match cli::parse(&args) {
+        Ok(c) => c,
+        Err(uso) => {
+            eprintln!("{uso}");
+            std::process::exit(2);
+        }
+    };
+
+    let engine = match evezip_engine::Engine::locate() {
+        Ok(e) => Arc::new(e) as Arc<dyn ArchiveEngine>,
+        Err(e) => {
+            eprintln!("EveZip: {e}. Rode scripts/fetch-7zz.sh.");
+            std::process::exit(1);
+        }
+    };
+
+    match comando {
+        cli::Cli::Extrair { archive, dest } => extrair_headless(&engine, archive, dest),
+        cli::Cli::ExtrairAqui(archives) => extrair_aqui(&engine, archives),
+        cli::Cli::Abrir(caminho) => abrir_ui(engine, caminho, Vec::new()),
+        cli::Cli::Comprimir(inputs) => {
+            // Abre no diretório do primeiro item; o diálogo de criação abre
+            // sozinho com esses arquivos (ver App::instalar_fila).
+            let dir = inputs
+                .first()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs_home().unwrap_or_else(|| PathBuf::from("/")));
+            abrir_ui(engine, Some(dir), inputs);
+        }
+    }
+}
+
+/// Extração sem UI: progresso percentual em stderr, exit code ≠ 0 em erro.
+fn extrair_headless(engine: &Arc<dyn ArchiveEngine>, archive: PathBuf, dest: Option<PathBuf>) {
+    let dest = cli::destino_padrao(&archive, dest);
+    let mut ultimo = 0u8;
+    let r = engine.extract(
+        &archive,
+        &dest,
+        None,
+        None,
+        &mut |p| {
+            if p != ultimo {
+                ultimo = p;
+                eprint!("\r{p}%");
+            }
+        },
+        &evezip_engine::CancelToken::new(),
+    );
+    eprintln!();
+    match r {
+        Ok(()) => println!("extraído em {}", dest.display()),
+        Err(e) => {
+            eprintln!("erro: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Extração sem UI de vários archives, cada um numa subpasta numerada ao lado
+/// dele (nunca sobrescreve). Usado pela Quick Action "Extrair com EveZip".
+/// Sai com código ≠ 0 se algum archive falhar (ex.: protegido por senha).
+fn extrair_aqui(engine: &Arc<dyn ArchiveEngine>, archives: Vec<PathBuf>) {
+    let mut erros = 0;
+    for archive in &archives {
+        let pasta = archive
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let dest = app::destino_extracao(&pasta, archive);
+        let r = engine.extract(
+            archive,
+            &dest,
+            None,
+            None,
+            &mut |_| {},
+            &evezip_engine::CancelToken::new(),
+        );
+        match r {
+            Ok(()) => println!("extraído: {} -> {}", archive.display(), dest.display()),
+            Err(e) => {
+                eprintln!("erro em {}: {e}", archive.display());
+                erros += 1;
+            }
+        }
+    }
+    if erros > 0 {
+        std::process::exit(1);
+    }
+}
+
+/// Abre a janela principal, opcionalmente já posicionada num archive ou pasta.
+/// `inputs_comprimir` não-vazio faz o diálogo de criação abrir com esses
+/// arquivos assim que a janela aparecer (fluxo "Comprimir com EveZip").
+fn abrir_ui(
+    engine: Arc<dyn ArchiveEngine>,
+    caminho: Option<PathBuf>,
+    inputs_comprimir: Vec<PathBuf>,
+) {
+    let config = Config::load();
+    let inicial = match caminho {
+        Some(p) if Browser::is_archive_file(&p.to_string_lossy()) => Location::Archive {
+            archive: p,
+            inner: String::new(),
+        },
+        Some(p) => Location::Disk(p),
+        // Sem caminho na linha de comando: retoma a última pasta usada se ela
+        // ainda existir; caso contrário, abre no home.
+        None => Location::Disk(pasta_inicial(&config)),
+    };
+    let app = app::App::new(Arc::clone(&engine), inicial).expect("falha ao criar janela");
+    app.state.borrow_mut().inputs_iniciais = inputs_comprimir;
+
+    // Mapa id → descrição do job, usado para preencher `JobRow.descricao`
+    // quando o evento `Started` chega (ele só carrega o id). Instância única,
+    // dona do processo `main`, compartilhada (via Arc<Mutex<_>>, pois a
+    // thread-ponte abaixo precisa ser `Send`) entre os callbacks da UI
+    // (`submeter`) e a thread-ponte (`aplicar_evento`).
+    let descricoes: Arc<Mutex<HashMap<evezip_core::JobId, String>>> = Arc::default();
+
+    // Mapa id → JobKind: guarda o "molde" de cada job para poder reenviá-lo com
+    // a senha digitada quando ele falha por senha (SenhaNecessaria/Incorreta).
+    // JobKind é `Send` (só caminhos e opções), então acompanha `descricoes`
+    // pela thread-ponte e é limpo em `aplicar_evento` nos eventos terminais.
+    let kinds: Arc<Mutex<HashMap<evezip_core::JobId, evezip_core::JobKind>>> = Arc::default();
+
+    // Fila de jobs + thread-ponte: eventos do worker (thread separada) são
+    // encaminhados para o thread da UI via `upgrade_in_event_loop`.
+    let (tx, rx) = mpsc::channel::<evezip_core::JobEvent>();
+    let queue = Arc::new(JobQueue::new(engine, tx));
+    app.instalar_fila(
+        Arc::clone(&queue),
+        Arc::clone(&descricoes),
+        Arc::clone(&kinds),
+    );
+
+    let weak = app.window_weak();
+    std::thread::spawn(move || {
+        for ev in rx {
+            let weak = weak.clone();
+            let descricoes = Arc::clone(&descricoes);
+            let kinds = Arc::clone(&kinds);
+            let _ = weak
+                .upgrade_in_event_loop(move |w| app::aplicar_evento(&w, &descricoes, &kinds, ev));
+        }
+    });
+
+    // macOS: Finder e `open` entregam o arquivo por Apple Event (não por argv).
+    // Instala o handler e drena os caminhos recebidos por um timer na UI thread,
+    // navegando até o archive. Mantido vivo até o fim de `run()`.
+    #[cfg(target_os = "macos")]
+    let _timer_open = {
+        macos_open::install();
+        let state = Rc::clone(&app.state);
+        let weak = app.window_weak();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                for path in macos_open::take_pending() {
+                    app::abrir_caminho_externo(&state, &weak, path);
+                }
+            },
+        );
+        timer
+    };
+
+    app.run().expect("event loop");
+
+    // Persiste a pasta atual (última usada) para a próxima abertura.
+    let dir_atual = pasta_de(&app.state.borrow().location);
+    let mut config = config;
+    config.ultima_pasta = Some(dir_atual);
+    let _ = config.save();
+
+    preview::limpar_temp();
+}
+
+/// Pasta em que a navegação está agora: o próprio diretório no disco, ou o
+/// diretório que contém o archive aberto.
+fn pasta_de(location: &Location) -> PathBuf {
+    match location {
+        Location::Disk(dir) => dir.clone(),
+        Location::Archive { archive, .. } => archive
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs_home().unwrap_or_else(|| PathBuf::from("/"))),
+    }
+}
+
+/// Pasta inicial ao abrir sem argumento: a última usada, se ainda existir;
+/// senão, o home.
+fn pasta_inicial(config: &Config) -> PathBuf {
+    match &config.ultima_pasta {
+        Some(p) if p.is_dir() => p.clone(),
+        _ => dirs_home().unwrap_or_else(|| PathBuf::from("/")),
+    }
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}

@@ -1,0 +1,78 @@
+import { Button, ComboBox, LineEdit, CheckBox, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component CreateDialog inherits Window {
+    title: "Criar archive";
+    width: 420px;
+    height: 260px;
+
+    callback confirmar(string, int, string, bool);
+    callback cancelar();
+
+    // Rótulos de nível → valor real de compressão do 7zz (mesma escala do
+    // 7-Zip: Store/Rápida/.../Ultra). O índice do ComboBox mapeia para cá.
+    property <[int]> niveis: [0, 1, 3, 5, 7, 9];
+
+    VerticalBox {
+        HorizontalBox {
+            Text { text: "Formato:"; vertical-alignment: center; width: 120px; }
+            formato := ComboBox { model: ["7z", "zip", "tar", "tar.gz"]; current-value: "7z"; }
+        }
+        HorizontalBox {
+            Text { text: "Compressão:"; vertical-alignment: center; width: 120px; }
+            nivel := ComboBox {
+                model: [
+                    "0 — Sem compressão",
+                    "1 — Mais rápida",
+                    "3 — Rápida",
+                    "5 — Normal",
+                    "7 — Máxima",
+                    "9 — Ultra",
+                ];
+                current-index: 3; // "5 — Normal" por padrão
+            }
+        }
+        HorizontalBox {
+            Text { text: "Senha:"; vertical-alignment: center; width: 120px; }
+            // tar/tar.gz não suportam senha no 7zz (ver evezip-engine::ops::create,
+            // que rejeita com OpcaoNaoSuportada) — o campo fica desabilitado para
+            // não sugerir uma proteção que não existiria.
+            senha := LineEdit {
+                input-type: password;
+                placeholder-text: "(sem senha)";
+                enabled: formato.current-value == "7z" || formato.current-value == "zip";
+            }
+        }
+        nomes := CheckBox {
+            text: "Criptografar nomes de arquivos (só 7z)";
+            enabled: formato.current-value == "7z";
+        }
+        HorizontalBox {
+            Button { text: "Cancelar"; clicked => { root.cancelar(); } }
+            Button {
+                text: "Criar";
+                primary: true;
+                clicked => { root.confirmar(formato.current-value, root.niveis[nivel.current-index], senha.text, nomes.checked); }
+            }
+        }
+    }
+}
+
+export component PasswordDialog inherits Window {
+    title: "Senha necessária";
+    width: 380px;
+    height: 150px;
+
+    in property <string> mensagem: "Este archive exige senha.";
+    in-out property <string> senha-texto;
+    callback confirmar(string);
+    callback cancelar();
+
+    VerticalBox {
+        Text { text: root.mensagem; wrap: word-wrap; }
+        senha := LineEdit { input-type: password; placeholder-text: "Senha"; text <=> root.senha-texto; }
+        HorizontalBox {
+            Button { text: "Cancelar"; clicked => { root.cancelar(); } }
+            Button { text: "OK"; primary: true; clicked => { root.confirmar(senha.text); } }
+        }
+    }
+}

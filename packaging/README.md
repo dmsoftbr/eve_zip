@@ -1,0 +1,152 @@
+# Empacotamento e associação de arquivos — EveZip
+
+Instruções de empacotamento e instalação por plataforma. Uso interno (v1);
+não há assinatura Apple/Microsoft nem instalador gráfico — a instalação é
+manual, mas suficiente para distribuir a build entre máquinas confiáveis.
+
+## macOS
+
+### Pré-requisitos
+
+A build requer um toolchain Rust estável funcional (via `rustup`), com
+`cargo` disponível no `PATH`. Se o Rust foi instalado via Homebrew
+(`brew install rustup`), é preciso rodar `rustup default stable` e garantir
+que o diretório `bin` do toolchain (normalmente `~/.cargo/bin`) esteja no
+`PATH` antes de executar o script de bundle.
+
+1. Rodar o script de bundle a partir da raiz do repositório:
+
+   ```bash
+   chmod +x scripts/package-macos.sh
+   ./scripts/package-macos.sh
+   ```
+
+   O script builda o release (`cargo build --release -p evezip-ui`), garante
+   o `7zz` vendorizado (`scripts/fetch-7zz.sh`), monta `target/EveZip.app`
+   (com `Contents/MacOS/evezip` e `Contents/MacOS/7zz` lado a lado — o motor
+   localiza o `7zz` pelo "diretório do executável", ver
+   `crates/evezip-engine/src/locate.rs`), assina ad-hoc (`codesign --sign -`)
+   e gera `target/EveZip.dmg` via `hdiutil`.
+
+2. Instalar: abrir o `.dmg` e arrastar `EveZip.app` para `/Applications`.
+
+3. Primeira execução: como a assinatura é ad-hoc (não há certificado de
+   desenvolvedor Apple), o Gatekeeper bloqueia o duplo-clique direto na
+   primeira vez. Usar clique-direito → **Abrir** e confirmar no diálogo.
+   Nas execuções seguintes o duplo-clique funciona normalmente.
+
+4. Associação de tipos de arquivo: o `Info.plist` já declara
+   `CFBundleDocumentTypes` para `zip`, `7z`, `rar`, `tar`, `gz`, `tgz`. Na
+   primeira vez, clicar com o botão direito num arquivo desses tipos →
+   **Abrir com** → **EveZip** → **Sempre abrir com esta aplicação**.
+
+## Linux
+
+Não há AppImage nesta versão (ver divergência de escopo abaixo). Instalação
+manual via tarball:
+
+1. Copiar o binário `evezip` (release) e o `7zz` vendorizado para
+   `/opt/evezip/` (mesmo diretório, para o motor localizar o `7zz` pelo
+   "diretório do executável"):
+
+   ```bash
+   sudo mkdir -p /opt/evezip
+   sudo cp target/release/evezip vendor/7zz/linux-x64/7zz /opt/evezip/
+   sudo chmod +x /opt/evezip/evezip /opt/evezip/7zz
+   ```
+
+2. Criar um link simbólico em `/usr/local/bin`:
+
+   ```bash
+   sudo ln -sf /opt/evezip/evezip /usr/local/bin/evezip
+   ```
+
+3. Instalar o atalho de menu/associação de MIME types copiando o
+   `.desktop`:
+
+   ```bash
+   mkdir -p ~/.local/share/applications
+   cp packaging/linux/evezip.desktop ~/.local/share/applications/
+   update-desktop-database ~/.local/share/applications 2>/dev/null || true
+   ```
+
+## Windows
+
+1. Copiar a pasta com `evezip.exe` e `7z.exe`/`7z.dll` (vendorizados em
+   `vendor/7zz/windows-x64/`) para `C:\Program Files\EveZip\` — o `7z.exe`
+   precisa ficar ao lado do `evezip.exe` para o motor localizá-lo pelo
+   "diretório do executável".
+
+2. Importar `packaging/windows/associar.reg` (duplo-clique ou
+   `reg import associar.reg`) para associar `.zip`, `.7z`, `.rar`, `.tar`,
+   `.gz` e `.tgz` ao EveZip. Se a instalação não for em
+   `C:\Program Files\EveZip\evezip.exe`, ajustar o caminho no `.reg` antes
+   de importar.
+
+## Divergência consciente da spec
+
+A spec original pedia AppImage para Linux. A v1 entrega tarball manual +
+`.desktop` (suficiente para uso interno). AppImage via `linuxdeploy` fica
+como melhoria futura, quando houver máquina Linux de referência disponível
+para validar o empacotamento.
+
+## macOS — "Comprimir com EveZip" no menu do Finder (Quick Action)
+
+Depois de instalar o `EveZip.app` em `/Applications`, rode:
+
+    ./packaging/macos/instalar-quick-action.sh
+
+Isso copia a Quick Action para `~/Library/Services/` e atualiza o cache de
+Serviços. Clique com o botão direito em um ou mais arquivos/pastas no Finder →
+**Comprimir com EveZip** (aparece em "Ações Rápidas" ou no submenu "Serviços").
+O EveZip abre com o diálogo de criação já preenchido com a seleção.
+
+A ação **Extrair com EveZip** aparece ao clicar com o botão direito num archive:
+extrai na mesma pasta, numa subpasta com o nome do archive (numerada se já
+existir), sem abrir janela. Archives com senha não são suportados por essa ação
+(use a janela do app para informar a senha).
+
+## Windows — menu de contexto e associação
+
+> Nota: o app ainda não tem verificação de 1ª classe no Windows (não há build
+> testado). Os arquivos abaixo estão prontos, mas dependem de o `evezip.exe`
+> compilar/rodar no Windows.
+
+1. Copie a pasta do EveZip (com `evezip.exe` + `7z.exe`/`7z.dll`) para
+   `C:\Program Files\EveZip` (ajuste os caminhos nos `.reg` se usar outro local).
+2. Associação de arquivo (duplo-clique abre no EveZip): importe
+   `packaging\windows\associar.reg`.
+3. Menu de contexto ("Comprimir/Extrair com EveZip" no botão direito): importe
+   `packaging\windows\menu-contexto.reg`. No Windows 11 aparece em
+   "Mostrar mais opções". Para remover: `remover-menu-contexto.reg`.
+
+- **Comprimir com EveZip** (em qualquer arquivo/pasta) → abre o diálogo de
+  criação com o item.
+- **Extrair com EveZip** (em .zip/.7z/.rar/.tar/.gz/.tgz) → extrai na mesma
+  pasta, em subpasta numerada, sem UI.
+
+Limitação: verbos clássicos do Windows passam um item por invocação, então
+selecionar vários e "Comprimir" abre um diálogo por item (não um archive único).
+
+## Linux — menu de contexto e associação
+
+Linux não tem um mecanismo único de menu de contexto; cada gerenciador de
+arquivos tem o seu. O instalador detecta os presentes e instala o certo:
+
+```bash
+./packaging/linux/instalar-menus.sh          # se 'evezip' já está no PATH
+./packaging/linux/instalar-menus.sh /opt/evezip/evezip   # ou passe o binário
+```
+
+Cobre **KDE/Dolphin** (ServiceMenus), **Cinnamon/Nemo** (actions),
+**GNOME/Nautilus** (submenu "Scripts") e **XFCE/Thunar** (custom actions), além
+de instalar o ícone e a associação de arquivo (`.desktop`). Reinicie o
+gerenciador de arquivos após instalar (ex.: `nautilus -q`, `nemo -q`).
+
+- **Comprimir com EveZip** (qualquer arquivo/pasta) → `evezip a` abre o diálogo
+  de criação com a seleção (vários itens = um archive só).
+- **Extrair com EveZip** (archives) → `evezip e` extrai na mesma pasta, em
+  subpasta numerada, sem UI.
+
+Requer o `evezip` no PATH (o `Exec=` chama `evezip`). Os formatos seguem a
+documentação de cada gerenciador; o funcionamento visual depende do ambiente.

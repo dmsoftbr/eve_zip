@@ -1,0 +1,29 @@
+[package]
+name = "evezip-ui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "evezip"
+path = "src/main.rs"
+
+[dependencies]
+evezip-core = { path = "../evezip-core" }
+evezip-engine = { path = "../evezip-engine" }
+slint = "1.12"
+rfd = "0.15"
+
+# macOS: tratar o Apple Event kAEOpenDocuments (Finder/`open` entregam o
+# arquivo por Apple Event, não por argv). Versões alinhadas com as que o Slint
+# já traz via winit para não duplicar na árvore.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSNotification",
+    "NSString",
+    "NSOperation",
+] }
+block2 = "0.6"
+
+[build-dependencies]
+slint-build = "1.12"

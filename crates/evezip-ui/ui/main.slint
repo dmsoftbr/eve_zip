@@ -1,0 +1,391 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { JobsPanel, JobRow } from "jobs.slint";
+import { CreateDialog, PasswordDialog } from "dialogs.slint";
+export { JobRow, CreateDialog, PasswordDialog }
+
+// Uma entrada da lista: kind = 0 pasta, 1 archive, 2 arquivo comum.
+export struct FileRow {
+    name: string,
+    size: string,
+    packed: string,
+    modified: string,
+    kind: int,
+}
+
+// Botão de toolbar com ícone + rótulo, estilo "ghost" (fundo só no hover).
+component ToolButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    callback clicked;
+    height: 34px;
+    border-radius: Theme.radius;
+    background: ta.has-hover ? Theme.elevated : transparent;
+    animate background { duration: 90ms; }
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 13px;
+        spacing: 8px;
+        alignment: center;
+        // Slot fixo: o Image tem tamanho preferido próprio (SVG 24px) e ignora
+        // `width` dentro de um layout; o Rectangle trava a largura em 16px.
+        Rectangle {
+            width: 16px;
+            Image {
+                width: 16px;
+                height: 16px;
+                source: root.icon;
+                colorize: Theme.text;
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Botão quadrado só com ícone (ex.: subir um nível).
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: Theme.radius;
+    background: ta.has-hover ? Theme.elevated : transparent;
+    animate background { duration: 90ms; }
+    Image {
+        width: 17px;
+        height: 17px;
+        source: root.icon;
+        colorize: Theme.text;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Uma linha da lista de arquivos: ícone por tipo + nome + colunas de dados.
+component FileRowItem inherits Rectangle {
+    in property <FileRow> entry;
+    in property <bool> selected;
+    in property <bool> em-archive; // true quando navegando dentro de um archive
+    callback clicked;
+    callback ver;      // menu de contexto: visualizar este item
+    callback extrair;  // menu de contexto: extrair este item
+
+    height: 30px;
+    background: root.selected ? Theme.sel : (ta.has-hover ? Theme.elevated : transparent);
+    animate background { duration: 70ms; }
+
+    property <image> icone: root.entry.kind == 0 ? @image-url("assets/icons/folder.svg") : root.entry.kind == 1 ? @image-url("assets/icons/file-archive.svg") : @image-url("assets/icons/file-text.svg");
+    property <color> cor-icone: root.entry.kind == 2 ? Theme.file-icon : Theme.accent;
+    // Só há menu quando há ação aplicável: dentro de um archive (ver/extrair),
+    // ou um arquivo-archive no disco (extrair).
+    property <bool> tem-menu: root.em-archive || root.entry.kind == 1;
+
+    menu := ContextMenuArea {
+        enabled: root.tem-menu;
+
+        // Barra de acento na seleção.
+        Rectangle {
+            x: 0;
+            width: 2px;
+            background: root.selected ? Theme.accent : transparent;
+        }
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 14px;
+            spacing: 0px;
+            // Slot fixo do ícone (mantém o texto colado logo à direita).
+            Rectangle {
+                width: 24px;
+                Image {
+                    width: 16px;
+                    height: 16px;
+                    source: root.icone;
+                    colorize: root.cor-icone;
+                }
+            }
+            Text {
+                text: root.entry.name;
+                color: Theme.text;
+                font-size: 13px;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.entry.size;
+                width: 96px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.entry.packed;
+                width: 96px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.faint;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.entry.modified;
+                width: 150px;
+                horizontal-alignment: right;
+                font-family: Theme.mono;
+                font-size: 12px;
+                color: Theme.faint;
+                vertical-alignment: center;
+            }
+        }
+        ta := TouchArea {
+            // Botão esquerdo: seleção / navegação (duplo-clique no Rust).
+            clicked => {
+                root.clicked();
+            }
+            // Botão direito: abre o menu de contexto na posição do cursor.
+            // (Um TouchArea captura o clique antes do ContextMenuArea; por isso
+            // o menu é disparado manualmente aqui em vez de automaticamente.)
+            pointer-event(ev) => {
+                if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.down) {
+                    menu.show({ x: self.mouse-x, y: self.mouse-y });
+                }
+            }
+        }
+
+        Menu {
+            if root.em-archive && root.entry.kind != 0: MenuItem {
+                title: "Ver";
+                activated => {
+                    root.ver();
+                }
+            }
+            if root.tem-menu: MenuItem {
+                title: "Extrair…";
+                activated => {
+                    root.extrair();
+                }
+            }
+        }
+    }
+}
+
+// Cabeçalho das colunas (alinhado com FileRowItem).
+component HeaderRow inherits Rectangle {
+    height: 30px;
+    background: Theme.bg;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 0px;
+        // Espaçador do mesmo tamanho do slot de ícone, para "Nome" alinhar
+        // com os nomes das linhas.
+        Rectangle {
+            width: 24px;
+        }
+        Text {
+            text: "Nome";
+            horizontal-stretch: 1;
+            color: Theme.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "Tamanho";
+            width: 96px;
+            horizontal-alignment: right;
+            color: Theme.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "Comprimido";
+            width: 96px;
+            horizontal-alignment: right;
+            color: Theme.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "Modificado";
+            width: 150px;
+            horizontal-alignment: right;
+            color: Theme.faint;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "EveZip";
+    min-width: 760px;
+    min-height: 500px;
+    background: Theme.bg;
+    default-font-size: 13px;
+
+    in property <[FileRow]> rows;
+    in property <string> caminho;
+    in property <string> status;
+    in property <[JobRow]> jobs;
+    in property <bool> em-archive; // navegando dentro de um archive?
+
+    callback linha-click(int);   // clique numa linha (Rust decide duplo-clique)
+    callback subir();
+    callback extrair();
+    callback adicionar();
+    callback testar();
+    callback cancelar-job(int);
+    // Menu de contexto de uma linha (por índice): ver / extrair só aquele item.
+    callback ver-entrada(int);
+    callback extrair-entrada(int);
+    // Disparado pelo Rust quando um job de extração/teste falha por senha:
+    // (id-do-job, senha-estava-incorreta).
+    callback pedir-senha-job(int, bool);
+
+    property <int> selecionada: -1;
+    out property <int> linha-atual: root.selecionada;
+
+    // Ao trocar de pasta/archive a lista muda: limpa a seleção.
+    changed rows => {
+        root.selecionada = -1;
+    }
+
+    VerticalLayout {
+        // Toolbar
+        Rectangle {
+            height: 56px;
+            background: Theme.panel;
+            HorizontalLayout {
+                padding: 11px;
+                spacing: 6px;
+                alignment: start;
+                ToolButton {
+                    icon: @image-url("assets/icons/folder-plus.svg");
+                    label: "Adicionar";
+                    clicked => {
+                        root.adicionar();
+                    }
+                }
+                ToolButton {
+                    icon: @image-url("assets/icons/package-open.svg");
+                    label: "Extrair";
+                    clicked => {
+                        root.extrair();
+                    }
+                }
+                ToolButton {
+                    icon: @image-url("assets/icons/shield-check.svg");
+                    label: "Testar";
+                    clicked => {
+                        root.testar();
+                    }
+                }
+                // Divisória vertical
+                Rectangle {
+                    width: 1px;
+                    background: Theme.hairline;
+                }
+                IconButton {
+                    icon: @image-url("assets/icons/arrow-up.svg");
+                    clicked => {
+                        root.subir();
+                    }
+                }
+                // Barra de localização (breadcrumb)
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 34px;
+                    border-radius: Theme.radius;
+                    background: Theme.bg;
+                    HorizontalLayout {
+                        padding-left: 11px;
+                        padding-right: 11px;
+                        Text {
+                            text: root.caminho;
+                            font-family: Theme.mono;
+                            font-size: 12px;
+                            color: Theme.muted;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        HeaderRow { }
+        Rectangle {
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        // Lista de arquivos
+        ListView {
+            vertical-stretch: 1;
+            for entry[idx] in root.rows: FileRowItem {
+                entry: entry;
+                selected: idx == root.selecionada;
+                em-archive: root.em-archive;
+                clicked => {
+                    root.selecionada = idx;
+                    root.linha-click(idx);
+                }
+                ver => {
+                    root.ver-entrada(idx);
+                }
+                extrair => {
+                    root.extrair-entrada(idx);
+                }
+            }
+        }
+
+        JobsPanel {
+            jobs: root.jobs;
+            cancelar(id) => {
+                root.cancelar-job(id);
+            }
+        }
+
+        // Status bar
+        Rectangle {
+            height: 26px;
+            background: Theme.panel;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text {
+                    text: root.status;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+}
