@@ -747,7 +747,8 @@ fn pedir_senha_e_reenviar_job(
 
 /// Abre um caminho vindo do SO (Finder / `open` no macOS): navega até o archive
 /// (ou entra na pasta). Se o archive exigir senha, dispara o fluxo de senha.
-/// Arquivos comuns são ignorados.
+/// Arquivos comuns são ignorados. Só usado no fluxo de Apple Events do macOS.
+#[cfg(target_os = "macos")]
 pub fn abrir_caminho_externo(
     state: &Rc<std::cell::RefCell<State>>,
     weak: &Weak<AppWindow>,

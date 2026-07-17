@@ -84,6 +84,11 @@ mod tests {
     use evezip_engine::{ArchiveEntry, CreateOptions};
     use std::sync::Mutex;
 
+    // Os dois testes compartilham o mesmo `temp_root()` (por-pid) e a env var
+    // EVEZIP_PREVIEW_NO_OPEN, e ambos chamam `limpar_temp()`. Rodando em
+    // paralelo, o cleanup de um apaga os arquivos do outro — serializa aqui.
+    static PREVIEW_LOCK: Mutex<()> = Mutex::new(());
+
     struct EngineGravador {
         extraidos: Mutex<Vec<String>>,
     }
@@ -131,6 +136,7 @@ mod tests {
 
     #[test]
     fn extrai_entrada_unica_para_temp() {
+        let _guard = PREVIEW_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Só valida a extração; abrir o app padrão é ignorado se EVEZIP_PREVIEW_NO_OPEN=1.
         std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
         let eng: Arc<dyn ArchiveEngine> = Arc::new(EngineGravador {
@@ -144,6 +150,7 @@ mod tests {
 
     #[test]
     fn rejeita_entry_path_com_traversal_antes_de_extrair() {
+        let _guard = PREVIEW_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Zip-slip: uma entrada "../../../foo" nunca deve chegar a extract()
         // nem a dest.join() — o preview tem que barrar antes.
         std::env::set_var("EVEZIP_PREVIEW_NO_OPEN", "1");
