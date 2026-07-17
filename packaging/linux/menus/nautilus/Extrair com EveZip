@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+IFS=$'\n' read -r -d '' -a files < <(printf '%s\0' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+args=(); for f in "${files[@]}"; do [ -n "$f" ] && args+=("$f"); done
+exec evezip e "${args[@]}"

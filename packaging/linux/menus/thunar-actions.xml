@@ -1,0 +1,23 @@
+<action>
+	<icon>evezip</icon>
+	<name>Comprimir com EveZip</name>
+	<unique-id>evezip-comprimir-1</unique-id>
+	<command>evezip a %F</command>
+	<description>Compactar com o EveZip</description>
+	<patterns>*</patterns>
+	<directories/>
+	<audio-files/>
+	<image-files/>
+	<other-files/>
+	<text-files/>
+	<video-files/>
+</action>
+<action>
+	<icon>evezip</icon>
+	<name>Extrair com EveZip</name>
+	<unique-id>evezip-extrair-1</unique-id>
+	<command>evezip e %F</command>
+	<description>Extrair archive com o EveZip</description>
+	<patterns>*.zip;*.7z;*.rar;*.tar;*.gz;*.tgz</patterns>
+	<other-files/>
+</action>

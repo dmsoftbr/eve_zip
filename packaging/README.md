@@ -127,3 +127,26 @@ existir), sem abrir janela. Archives com senha não são suportados por essa aç
 
 Limitação: verbos clássicos do Windows passam um item por invocação, então
 selecionar vários e "Comprimir" abre um diálogo por item (não um archive único).
+
+## Linux — menu de contexto e associação
+
+Linux não tem um mecanismo único de menu de contexto; cada gerenciador de
+arquivos tem o seu. O instalador detecta os presentes e instala o certo:
+
+```bash
+./packaging/linux/instalar-menus.sh          # se 'evezip' já está no PATH
+./packaging/linux/instalar-menus.sh /opt/evezip/evezip   # ou passe o binário
+```
+
+Cobre **KDE/Dolphin** (ServiceMenus), **Cinnamon/Nemo** (actions),
+**GNOME/Nautilus** (submenu "Scripts") e **XFCE/Thunar** (custom actions), além
+de instalar o ícone e a associação de arquivo (`.desktop`). Reinicie o
+gerenciador de arquivos após instalar (ex.: `nautilus -q`, `nemo -q`).
+
+- **Comprimir com EveZip** (qualquer arquivo/pasta) → `evezip a` abre o diálogo
+  de criação com a seleção (vários itens = um archive só).
+- **Extrair com EveZip** (archives) → `evezip e` extrai na mesma pasta, em
+  subpasta numerada, sem UI.
+
+Requer o `evezip` no PATH (o `Exec=` chama `evezip`). Os formatos seguem a
+documentação de cada gerenciador; o funcionamento visual depende do ambiente.

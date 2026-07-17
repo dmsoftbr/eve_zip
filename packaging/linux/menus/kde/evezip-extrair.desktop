@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+MimeType=application/zip;application/x-7z-compressed;application/vnd.rar;application/x-tar;application/gzip;application/x-compressed-tar;
+Name=Extrair com EveZip
+Actions=extrair;
+X-KDE-Priority=TopLevel
+Icon=evezip
+
+[Desktop Action extrair]
+Name=Extrair com EveZip
+Icon=evezip
+Exec=evezip e %F
