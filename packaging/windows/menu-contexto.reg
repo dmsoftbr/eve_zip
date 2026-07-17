@@ -1,0 +1,74 @@
+Windows Registry Editor Version 5.00
+
+; Menu de contexto do EveZip (verbos "Comprimir/Extrair com EveZip").
+; Instala em HKEY_CURRENT_USER (não precisa de admin). No Windows 11 os verbos
+; clássicos aparecem em "Mostrar mais opções".
+;
+; Ajuste o caminho se instalar o EveZip fora de C:\Program Files\EveZip.
+; Escape de barra invertida no .reg: "\\". "%1" = item clicado; "%V" = pasta.
+
+; ---------------------------------------------------------------------------
+; "Comprimir com EveZip" — em qualquer arquivo (*) e em pastas (Directory).
+; evezip a <item>: abre o diálogo de criação já com o item selecionado.
+; (Verbo clássico passa um item por invocação; múltipla seleção abre várias.)
+; ---------------------------------------------------------------------------
+[HKEY_CURRENT_USER\Software\Classes\*\shell\EveZipComprimir]
+@="Comprimir com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\EveZipComprimir\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" a \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\EveZipComprimir]
+@="Comprimir com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\EveZipComprimir\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" a \"%1\""
+
+; ---------------------------------------------------------------------------
+; "Extrair com EveZip" — nos tipos de archive (via SystemFileAssociations,
+; independe de qual app abre o arquivo). evezip e <archive>: extrai na mesma
+; pasta, numa subpasta numerada (nunca sobrescreve), sem UI.
+; ---------------------------------------------------------------------------
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\EveZipExtrair]
+@="Extrair com EveZip"
+"Icon"="\"C:\\Program Files\\EveZip\\evezip.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\EveZipExtrair\command]
+@="\"C:\\Program Files\\EveZip\\evezip.exe\" e \"%1\""

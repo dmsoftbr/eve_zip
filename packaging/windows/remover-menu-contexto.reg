@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+; Remove os verbos de menu de contexto do EveZip (desfaz menu-contexto.reg).
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\EveZipComprimir]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\EveZipComprimir]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\EveZipExtrair]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\EveZipExtrair]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\EveZipExtrair]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\EveZipExtrair]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\EveZipExtrair]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\EveZipExtrair]

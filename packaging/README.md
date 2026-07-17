@@ -105,3 +105,25 @@ A ação **Extrair com EveZip** aparece ao clicar com o botão direito num archi
 extrai na mesma pasta, numa subpasta com o nome do archive (numerada se já
 existir), sem abrir janela. Archives com senha não são suportados por essa ação
 (use a janela do app para informar a senha).
+
+## Windows — menu de contexto e associação
+
+> Nota: o app ainda não tem verificação de 1ª classe no Windows (não há build
+> testado). Os arquivos abaixo estão prontos, mas dependem de o `evezip.exe`
+> compilar/rodar no Windows.
+
+1. Copie a pasta do EveZip (com `evezip.exe` + `7z.exe`/`7z.dll`) para
+   `C:\Program Files\EveZip` (ajuste os caminhos nos `.reg` se usar outro local).
+2. Associação de arquivo (duplo-clique abre no EveZip): importe
+   `packaging\windows\associar.reg`.
+3. Menu de contexto ("Comprimir/Extrair com EveZip" no botão direito): importe
+   `packaging\windows\menu-contexto.reg`. No Windows 11 aparece em
+   "Mostrar mais opções". Para remover: `remover-menu-contexto.reg`.
+
+- **Comprimir com EveZip** (em qualquer arquivo/pasta) → abre o diálogo de
+  criação com o item.
+- **Extrair com EveZip** (em .zip/.7z/.rar/.tar/.gz/.tgz) → extrai na mesma
+  pasta, em subpasta numerada, sem UI.
+
+Limitação: verbos clássicos do Windows passam um item por invocação, então
+selecionar vários e "Comprimir" abre um diálogo por item (não um archive único).
